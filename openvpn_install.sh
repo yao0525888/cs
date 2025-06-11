@@ -541,12 +541,12 @@ install_frps() {
 }
 show_service_info() {
     log_step "OpenVPN & FRPS服务状态:"
-    systemctl status frps --no-pager | grep -E 'Active:'
+    systemctl status frps --no-pager | grep -E 'Active:' | sed 's/^[ \t]*//'
     if $USE_SYSTEMD; then
         if systemctl list-unit-files | grep -q openvpn-server@; then
-            systemctl status openvpn-server@server --no-pager | grep -E 'Active:'
+            systemctl status openvpn-server@server --no-pager | grep -E 'Active:' | sed 's/^[ \t]*//'
         else
-            systemctl status openvpn@server --no-pager | grep -E 'Active:'
+            systemctl status openvpn@server --no-pager | grep -E 'Active:' | sed 's/^[ \t]*//'
         fi
     else
         ps aux | grep '[o]penvpn'
@@ -564,7 +564,6 @@ show_service_info() {
     log_info "Web管理用户: ${FRPS_DASHBOARD_USER}"
     log_info "Web管理密码: ${FRPS_DASHBOARD_PWD}"
     log_info "Web管理界面: http://$(curl -s ifconfig.me || hostname -I | awk '{print $1}'):${FRPS_DASHBOARD_PORT}"
-
 }
 run_install() {
     install_dependencies
