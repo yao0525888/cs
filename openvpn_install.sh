@@ -8,7 +8,7 @@ PURPLE="\033[35m"
 WHITE="\033[37m"
 BOLD="\033[1m"
 PLAIN="\033[0m"
-log_info() { echo -e "${CYAN}[$(date "+%Y-%m-%d %H:%M:%S")] [ℹ] ${WHITE}$1${PLAIN}"; }
+log_info() { echo -e "${CYAN}[$(date "+%Y-%m-%d %H:%M:%S")] [⚠] ${WHITE}$1${PLAIN}"; }
 log_warn() { echo -e "${YELLOW}[$(date "+%Y-%m-%d %H:%M:%S")] [⚠] ${YELLOW}$1${PLAIN}"; }
 log_success() { echo -e "${GREEN}[$(date "+%Y-%m-%d %H:%M:%S")] [✓] ${GREEN}$1${PLAIN}"; }
 log_error() { echo -e "${RED}[$(date "+%Y-%m-%d %H:%M:%S")] [✗] ${RED}$1${PLAIN}" >&2; }
