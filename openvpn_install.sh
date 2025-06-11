@@ -434,7 +434,7 @@ uninstall() {
         sysctl -p >/dev/null 2>&1
     fi
     iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $(ip route get 8.8.8.8 | awk '{print $5; exit}') -j MASQUERADE 2>/dev/null
-    log_success "OpenVPN 和 FRP 已完全卸载，所有相关端口已释放"
+    log_success "OpenVPN 和 FRP 已完全卸载。"
 }
 change_port() {
     local new_port=$1
@@ -537,19 +537,11 @@ install_frps() {
         error_exit "启用并启动FRPS服务失败"
     fi
     log_success "FRPS安装成功"
-    show_frps_info
-
+    show_service_info
 }
-show_frps_info() {
-    log_step "FRPS服务状态:"
+show_service_info() {
+    log_step "OpenVPN&FRPS服务状态:"
     systemctl status frps --no-pager | grep -E 'Active:'
-    log_step "FRPS信息:"
-    log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
-    log_info "FRPS 端口: ${FRPS_PORT}"
-    log_info "FRPS 密码: ${FRPS_TOKEN}"
-}
-show_openvpn_info() {
-    log_step "OpenVPN服务状态:"
     if $USE_SYSTEMD; then
         if systemctl list-unit-files | grep -q openvpn-server@; then
             systemctl status openvpn-server@server --no-pager | grep -E 'Active:'
@@ -559,9 +551,20 @@ show_openvpn_info() {
     else
         ps aux | grep '[o]penvpn'
     fi
+    if [ -c /dev/net/tun ]; then
+        log_info "TUN设备: 可用"
+    else
+        log_info "TUN设备: 不可用 - 可能会影响OpenVPN运行"
+    fi
     log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
     log_info "OpenVPN协议类型: ${DEFAULT_PROTOCOL}"
     log_info "OpenVPN服务端口: ${DEFAULT_PORT}"
+    log_info "FRPS 端口: ${FRPS_PORT}"
+    log_info "FRPS 密码: ${FRPS_TOKEN}"
+    log_info "Web管理用户: ${FRPS_DASHBOARD_USER}"
+    log_info "Web管理密码: ${FRPS_DASHBOARD_PWD}"
+    log_info "Web管理界面: http://$(curl -s ifconfig.me || hostname -I | awk '{print $1}'):${FRPS_DASHBOARD_PORT}"
+
 }
 run_install() {
     install_dependencies
@@ -571,34 +574,17 @@ run_install() {
     setup_port_forwarding
     start_service
     install_frps
-    echo -e "\n${GREEN}${BOLD}=== OpenVPN 信息 ===${PLAIN}"
-    show_openvpn_info
-    if [ -c /dev/net/tun ]; then
-        echo -e "${WHITE}• TUN设备:${GREEN} 可用${PLAIN}"
-    else
-        echo -e "${WHITE}• TUN设备:${RED} 不可用 - 可能会影响OpenVPN运行${PLAIN}"
-    fi
-    echo -e "\n${GREEN}${BOLD}=== FRPS 信息 ===${PLAIN}"
-    echo -e "${WHITE}• 服务状态:${GREEN} 已启动并运行${PLAIN}"
-    log_step "FRPS服务状态:"
-    systemctl status frps --no-pager | grep -E 'Active:'
-    echo -e "${WHITE}• 服务地址:${GREEN} $(curl -s ifconfig.me || hostname -I | awk '{print $1}')${PLAIN}"
-    echo -e "${WHITE}• FRP端口:${GREEN} ${FRPS_PORT}${PLAIN}"
-    echo -e "${WHITE}• 管理界面:${GREEN} http://$(curl -s ifconfig.me || hostname -I | awk '{print $1}'):${FRPS_DASHBOARD_PORT}${PLAIN}"
-    echo -e "${WHITE}• 管理用户:${GREEN} ${FRPS_DASHBOARD_USER}${PLAIN}"
-    echo -e "${WHITE}• 管理密码:${GREEN} ${FRPS_DASHBOARD_PWD}${PLAIN}"
-    echo -e "\n${WHITE}${BOLD}=== 客户端配置文件 ===${PLAIN}"
-    echo -e "${WHITE}• 配置文件路径:${GREEN} $CLIENT_CONFIG${PLAIN}"
+    echo -e "\n${GREEN}${BOLD}=== 服务信息 ===${PLAIN}"
+    show_service_info
     generate_download_link
 }
 show_menu() {
     clear
-    echo -e "                     ${WHITE}${BOLD}OpenVPN + FRP 安装管理菜单${PLAIN}${CYAN}"
+    echo -e "${WHITE}${BOLD}OpenVPN + FRP 安装管理菜单${PLAIN}${CYAN}"
     echo -e "${GREEN}1.${PLAIN} 安装 OpenVPN 和 FRP"
     echo -e "${GREEN}2.${PLAIN} 卸载 OpenVPN 和 FRP"
-    echo -e "${GREEN}0.${PLAIN} 退出脚本"
-    echo -e ""
-    read -rp "请输入选项 [0-2]: " menu_option
+    echo -e "${GREEN}3.${PLAIN} 退出脚本"
+    read -rp "请输入选项 [1-3]: " menu_option
     case $menu_option in
         1)
             run_install
@@ -606,12 +592,11 @@ show_menu() {
         2)
             uninstall
             log_success "卸载完成"
-            sleep 2
             show_menu
             ;;
-        0)
+        3)
             log_info "退出脚本"
-            exit 0
+            exit 2
             ;;
         *)
             log_error "无效的选项，请重新选择"
