@@ -8,12 +8,12 @@ PURPLE="\033[35m"
 WHITE="\033[37m"
 BOLD="\033[1m"
 PLAIN="\033[0m"
-log_info() { echo -e "${CYAN} ${WHITE}$1${PLAIN}"; }
-log_warn() { echo -e "${YELLOW} ${YELLOW}$1${PLAIN}"; }
-log_success() { echo -e "${GREEN}[✓] ${GREEN}$1${PLAIN}"; }
-log_error() { echo -e "${RED} ${RED}$1${PLAIN}" >&2; }
-log_debug() { echo -e "${PURPLE} ${PURPLE}$1${PLAIN}"; }
-log_step() { echo -e "${BLUE} ${BLUE}${BOLD}$1${PLAIN}"; }
+log_info() { echo -e "${CYAN}${WHITE}$1${PLAIN}"; }
+log_warn() { echo -e "${YELLOW}${YELLOW}$1${PLAIN}"; }
+log_success() { echo -e "${GREEN}${GREEN}$1${PLAIN}"; }
+log_error() { echo -e "${RED}${RED}$1${PLAIN}" >&2; }
+log_debug() { echo -e "${PURPLE}${PURPLE}$1${PLAIN}"; }
+log_step() { echo -e "${BLUE}${BLUE}${BOLD}$1${PLAIN}"; }
 error_exit() {
     log_error "$1"
     exit 1
@@ -50,7 +50,7 @@ install_dependencies() {
         yum install -y epel-release &> /dev/null
         yum install -y openvpn easy-rsa openssl curl wget python3 iptables-services &> /dev/null || error_exit "依赖安装失败"
     else
-        error_exit "不支持的操作系统，无法安装OpenVPN依赖。"
+        error_exit "不支持的操作系统,无法安装OpenVPN依赖。"
     fi
 }
 generate_certificates() {
@@ -411,11 +411,9 @@ uninstall() {
     fi
     pkill -9 openvpn >/dev/null 2>&1
     pkill -9 frps >/dev/null 2>&1
-    log_step "释放所有相关端口..."
     for port in $DEFAULT_PORT $FRPS_PORT $FRPS_KCP_PORT $FRPS_DASHBOARD_PORT 80; do
         local pid=$(lsof -t -i :$port 2>/dev/null)
         if [ -n "$pid" ]; then
-            log_info "释放端口 $port..."
             kill $pid >/dev/null 2>&1
             sleep 1
             kill -9 $pid >/dev/null 2>&1 2>/dev/null
@@ -450,7 +448,7 @@ generate_download_link() {
     local config_path="/usr/local/openvpn/client.ovpn"
     if [ -f "$config_path" ]; then
         if lsof -i :80 > /dev/null 2>&1; then
-            log_error "错误:80 端口已被占用，请手动复制配置文件"
+            log_error "错误:80 端口已被占用"
             return 1
         fi
         log_success "客户端配置文件下载链接："
@@ -540,6 +538,7 @@ install_frps() {
     fi
     log_success "FRPS安装成功"
     show_frps_info
+
 }
 show_frps_info() {
     log_step "FRPS服务状态:"
@@ -548,9 +547,6 @@ show_frps_info() {
     log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
     log_info "FRPS 端口: ${FRPS_PORT}"
     log_info "FRPS 密码: ${FRPS_TOKEN}"
-    log_info "Web管理界面: http://$(curl -s ifconfig.me || hostname -I | awk '{print $1}'):${FRPS_DASHBOARD_PORT}"
-    log_info "Web管理用户名: ${FRPS_DASHBOARD_USER}"
-    log_info "Web管理密码: ${FRPS_DASHBOARD_PWD}"
 }
 show_openvpn_info() {
     log_step "OpenVPN服务状态:"
@@ -563,11 +559,9 @@ show_openvpn_info() {
     else
         ps aux | grep '[o]penvpn'
     fi
-    log_step ""
     log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
-    log_info "协议类型: ${DEFAULT_PROTOCOL}"
-    log_info "服务端口: ${DEFAULT_PORT}"
-    log_info "客户端配置: ${CLIENT_CONFIG}"
+    log_info "OpenVPN协议类型: ${DEFAULT_PROTOCOL}"
+    log_info "OpenVPN服务端口: ${DEFAULT_PORT}"
 }
 run_install() {
     install_dependencies
@@ -577,9 +571,6 @@ run_install() {
     setup_port_forwarding
     start_service
     install_frps
-    echo -e "${GREEN}+---------------------------------------------------------------------+${PLAIN}"
-    echo -e "${GREEN}|                          ${WHITE}${BOLD}安装完成${PLAIN}${GREEN}                                |${PLAIN}"
-    echo -e "${GREEN}+---------------------------------------------------------------------+${PLAIN}"
     echo -e "\n${GREEN}${BOLD}=== OpenVPN 信息 ===${PLAIN}"
     show_openvpn_info
     if [ -c /dev/net/tun ]; then
@@ -602,16 +593,12 @@ run_install() {
 }
 show_menu() {
     clear
-    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
-    echo -e "${CYAN}|                     ${WHITE}${BOLD}OpenVPN + FRP 安装管理菜单${PLAIN}${CYAN}                   |${PLAIN}"
-    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
-    echo -e ""
+    echo -e "                     ${WHITE}${BOLD}OpenVPN + FRP 安装管理菜单${PLAIN}${CYAN}"
     echo -e "${GREEN}1.${PLAIN} 安装 OpenVPN 和 FRP"
-    echo -e "${RED}2.${PLAIN} 卸载 OpenVPN 和 FRP 并释放端口"
-    echo -e "${YELLOW}0.${PLAIN} 退出脚本"
+    echo -e "${GREEN}2.${PLAIN} 卸载 OpenVPN 和 FRP"
+    echo -e "${GREEN}0.${PLAIN} 退出脚本"
     echo -e ""
     read -rp "请输入选项 [0-2]: " menu_option
-    
     case $menu_option in
         1)
             run_install
