@@ -26,7 +26,7 @@ SERVER_IP=$(curl -s ifconfig.me)
 CONFIG_DIR="/usr/local/openvpn"
 SERVER_CONFIG="$CONFIG_DIR/server.conf"
 CLIENT_CONFIG="$CONFIG_DIR/client.ovpn"
-SILENT_MODE=false
+SILENT_MODE=true
 FRP_VERSION="v0.62.1"
 FRPS_PORT="7000"
 FRPS_UDP_PORT="7001"
@@ -165,7 +165,6 @@ EOF
         if dpkg -l | grep -q iptables-persistent; then
             netfilter-persistent save > /dev/null 2>&1
         else
-            # 创建自定义服务
             cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
 [Unit]
 Description=Restore iptables rules
@@ -182,41 +181,29 @@ EOF
             systemctl daemon-reload > /dev/null 2>&1
             systemctl enable iptables > /dev/null 2>&1 && systemctl start iptables > /dev/null 2>&1
             if [ $? -ne 0 ]; then
-                log_warn "无法启用自定义iptables服务，尝试替代方法..."
-                # 备份方案：在启动时加载规则
                 if [ -d /etc/network/if-pre-up.d ]; then
                     echo "#!/bin/sh" > /etc/network/if-pre-up.d/iptables
                     echo "iptables-restore < /etc/iptables.rules" >> /etc/network/if-pre-up.d/iptables
                     chmod +x /etc/network/if-pre-up.d/iptables
-                    log_success "已设置网络启动时加载iptables规则"
                 elif [ -d /etc/NetworkManager/dispatcher.d ]; then
                     echo "#!/bin/sh" > /etc/NetworkManager/dispatcher.d/99-iptables
                     echo "iptables-restore < /etc/iptables.rules" >> /etc/NetworkManager/dispatcher.d/99-iptables
                     chmod +x /etc/NetworkManager/dispatcher.d/99-iptables
-                    log_success "已设置NetworkManager启动时加载iptables规则"
                 else
                     echo "@reboot root iptables-restore < /etc/iptables.rules" > /etc/cron.d/iptables-restore
-                    log_success "已设置系统启动时通过cron加载iptables规则"
                 fi
-            else
-                log_success "iptables服务已启用"
             fi
         fi
     elif command -v yum >/dev/null 2>&1; then
-        # CentOS/RHEL系统
         if command -v firewall-cmd >/dev/null 2>&1; then
-            log_info "检测到firewalld，使用firewalld配置..."
             firewall-cmd --permanent --direct --passthrough ipv4 -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE > /dev/null 2>&1
             firewall-cmd --permanent --add-masquerade > /dev/null 2>&1
             firewall-cmd --reload > /dev/null 2>&1
-            log_success "已通过firewalld启用IP转发和伪装"
         else
-            # 如果使用传统iptables
             if command -v chkconfig >/dev/null 2>&1; then
                 chkconfig iptables on > /dev/null 2>&1
             else
                 systemctl enable iptables > /dev/null 2>&1 || {
-                    # 创建自定义服务
                     cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
 [Unit]
 Description=Restore iptables rules
@@ -235,15 +222,12 @@ EOF
                         echo "#!/bin/bash" > /etc/rc.d/rc.local
                         echo "iptables-restore < /etc/iptables.rules" >> /etc/rc.d/rc.local
                         chmod +x /etc/rc.d/rc.local
-                        log_success "已设置系统启动时通过rc.local加载iptables规则"
                     }
                 }
             fi
             service iptables save > /dev/null 2>&1
-            log_success "iptables规则已保存"
         fi
     else
-        # 其他系统的通用方法
         cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
 [Unit]
 Description=Restore iptables rules
@@ -259,7 +243,6 @@ WantedBy=multi-user.target
 EOF
         systemctl daemon-reload > /dev/null 2>&1
         if ! systemctl enable iptables > /dev/null 2>&1; then
-            log_warn "无法启用iptables服务，使用替代方法..."
             if [ -f /etc/rc.local ]; then
                 sed -i '/exit 0/i iptables-restore < /etc/iptables.rules' /etc/rc.local
             else
@@ -268,19 +251,15 @@ EOF
                 echo "exit 0" >> /etc/rc.local
                 chmod +x /etc/rc.local
             fi
-            log_success "已设置系统启动时通过rc.local加载iptables规则"
         else
             systemctl start iptables > /dev/null 2>&1
-            log_success "iptables服务已启用"
         fi
     fi
 }
 start_service() {
     log_step "正在启动 OpenVPN 服务..."
     
-    # 检查OpenVPN配置文件
     if [ ! -f "/etc/openvpn/server/server.conf" ] && [ -f "$SERVER_CONFIG" ]; then
-        log_info "配置文件需要移动到标准位置..."
         mkdir -p /etc/openvpn/server/ > /dev/null 2>&1
         cp "$SERVER_CONFIG" /etc/openvpn/server/server.conf > /dev/null 2>&1
         cp "$CONFIG_DIR/ca.crt" /etc/openvpn/server/ > /dev/null 2>&1
@@ -290,22 +269,13 @@ start_service() {
         cp "$CONFIG_DIR/ta.key" /etc/openvpn/server/ > /dev/null 2>&1
     fi
     
-    # 检查系统使用的初始化系统
-    log_info "检测系统初始化类型..."
     USE_SYSTEMD=false
     if command -v systemctl >/dev/null 2>&1 && systemctl --no-pager >/dev/null 2>&1; then
         USE_SYSTEMD=true
-        log_info "系统使用 systemd"
-    else
-        log_info "系统使用传统init脚本"
     fi
     
     if $USE_SYSTEMD; then
-        # 检查服务文件是否存在
         if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
-            log_info "未找到标准OpenVPN服务单元文件，尝试创建..."
-            
-            # 根据不同版本创建适当的服务文件
             if [ -f /usr/sbin/openvpn ]; then
                 OPENVPN_BIN="/usr/sbin/openvpn"
             elif [ -f /usr/bin/openvpn ]; then
@@ -314,7 +284,6 @@ start_service() {
                 error_exit "未找到OpenVPN二进制文件"
             fi
             
-            # 尝试创建服务文件
             cat > /etc/systemd/system/openvpn-server@.service << EOF
 [Unit]
 Description=OpenVPN service for %I
@@ -337,40 +306,23 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-            log_info "已创建自定义OpenVPN服务单元文件"
             mkdir -p /var/log/openvpn > /dev/null 2>&1
         fi
         
-        # 尝试确定正确的服务名称
         if systemctl list-unit-files | grep -q openvpn-server@; then
             SERVICE_NAME="openvpn-server@server"
         else
             SERVICE_NAME="openvpn@server"
         fi
         
-        # 重新加载systemd配置
-        log_info "重新加载systemd配置..."
         systemctl daemon-reload > /dev/null 2>&1
-        
-        # 启用并启动服务
-        log_info "启用并启动服务: $SERVICE_NAME"
         systemctl enable $SERVICE_NAME > /dev/null 2>&1
         
-        # 尝试启动服务，如果失败则获取详细错误信息
         if ! systemctl restart $SERVICE_NAME > /dev/null 2>&1; then
-            log_error "启动OpenVPN服务失败，查看错误信息:"
-            systemctl status $SERVICE_NAME --no-pager
-            log_warn "尝试替代启动方法..."
-            
-            # 尝试直接启动OpenVPN
-            log_info "尝试直接启动OpenVPN..."
             if [ -f /etc/openvpn/server/server.conf ]; then
                 nohup $OPENVPN_BIN --config /etc/openvpn/server/server.conf > /var/log/openvpn-direct.log 2>&1 &
                 sleep 2
                 if pgrep -x openvpn > /dev/null; then
-                    log_success "OpenVPN已直接启动"
-                    
-                    # 创建开机自启动脚本
                     if [ -d /etc/rc.d ]; then
                         echo "#!/bin/bash" > /etc/rc.d/rc.openvpn
                         echo "$OPENVPN_BIN --config /etc/openvpn/server/server.conf --daemon" >> /etc/rc.d/rc.openvpn
@@ -384,22 +336,17 @@ EOF
                         chmod +x /etc/rc.local
                     fi
                 else
-                    error_exit "无法启动OpenVPN，请查看日志：/var/log/openvpn-direct.log"
+                    error_exit "无法启动OpenVPN"
                 fi
             else
                 error_exit "找不到OpenVPN配置文件"
             fi
-        else
-            log_success "OpenVPN服务已成功启动"
         fi
     else
-        # 非systemd系统的处理
         if [ -f /etc/init.d/openvpn ]; then
-            log_info "使用init脚本启动OpenVPN..."
             update-rc.d openvpn enable > /dev/null 2>&1 || chkconfig openvpn on > /dev/null 2>&1
             /etc/init.d/openvpn restart > /dev/null 2>&1
             if [ $? -ne 0 ]; then
-                log_error "通过init脚本启动OpenVPN失败，尝试替代方法..."
                 if [ -f /usr/sbin/openvpn ]; then
                     OPENVPN_BIN="/usr/sbin/openvpn"
                 elif [ -f /usr/bin/openvpn ]; then
@@ -410,17 +357,11 @@ EOF
                 
                 nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
                 sleep 2
-                if pgrep -x openvpn > /dev/null; then
-                    log_success "OpenVPN已直接启动"
-                else
-                    error_exit "无法启动OpenVPN，请查看日志：/var/log/openvpn-direct.log"
+                if ! pgrep -x openvpn > /dev/null; then
+                    error_exit "无法启动OpenVPN"
                 fi
-            else
-                log_success "OpenVPN服务已通过init脚本启动"
             fi
         else
-            # 无法找到初始化脚本，尝试直接启动
-            log_warn "找不到OpenVPN初始化脚本，尝试直接启动..."
             if [ -f /usr/sbin/openvpn ]; then
                 OPENVPN_BIN="/usr/sbin/openvpn"
             elif [ -f /usr/bin/openvpn ]; then
@@ -432,9 +373,6 @@ EOF
             nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
             sleep 2
             if pgrep -x openvpn > /dev/null; then
-                log_success "OpenVPN已直接启动"
-                
-                # 创建开机自启动脚本
                 if [ -d /etc/rc.d ]; then
                     echo "#!/bin/bash" > /etc/rc.d/rc.openvpn
                     echo "$OPENVPN_BIN --config $SERVER_CONFIG --daemon" >> /etc/rc.d/rc.openvpn
@@ -443,17 +381,14 @@ EOF
                     sed -i '/exit 0/i '$OPENVPN_BIN' --config '$SERVER_CONFIG' --daemon' /etc/rc.local
                 fi
             else
-                error_exit "无法启动OpenVPN，请查看日志：/var/log/openvpn-direct.log"
+                error_exit "无法启动OpenVPN"
             fi
         fi
     fi
     
-    # 检查OpenVPN是否真的在运行
     sleep 3
-    if pgrep -x openvpn > /dev/null; then
-        log_success "OpenVPN服务已成功运行"
-    else
-        log_error "警告：OpenVPN服务似乎未运行，请手动检查"
+    if ! pgrep -x openvpn > /dev/null; then
+        error_exit "OpenVPN服务启动失败"
     fi
 }
 uninstall() {
@@ -493,8 +428,8 @@ generate_download_link() {
     local config_path="/usr/local/openvpn/client.ovpn"
     if [ -f "$config_path" ]; then
         if lsof -i :80 > /dev/null 2>&1; then
-            log_error "错误：80 端口已被占用，请先关闭占用该端口的服务"
-            exit 1
+            log_error "错误：80 端口已被占用，请手动复制配置文件"
+            return 1
         fi
         log_success "客户端配置文件下载链接："
         log_info "http://$SERVER_IP/client.ovpn"
@@ -503,9 +438,10 @@ generate_download_link() {
          pid=$!
          sleep 600
          kill $pid 2>/dev/null) &
-        exit 0
+        return 0
     else
         log_error "客户端配置文件不存在"
+        return 1
     fi
 }
 uninstall_frps() {
@@ -596,62 +532,47 @@ show_frps_info() {
     log_info "Web管理用户名: ${FRPS_DASHBOARD_USER}"
     log_info "Web管理密码: ${FRPS_DASHBOARD_PWD}"
 }
-main_menu() {
-    while true; do
-        echo -e "${CYAN}╭────────────────────────────────────────────────────────────────────╮${PLAIN}"
-        echo -e "${CYAN}│                       ${WHITE}${BOLD}OpenVPN + FRP 管理面板${PLAIN}${CYAN}                     │${PLAIN}"
-        echo -e "${CYAN}╰────────────────────────────────────────────────────────────────────╯${PLAIN}"
-        log_info "请选择操作："
-        echo -e "${WHITE}  1) ${GREEN}安装 OpenVPN + FRP${PLAIN}"
-        echo -e "${WHITE}  2) ${RED}卸载 OpenVPN${PLAIN}"
-        echo -e "${WHITE}  3) ${BLUE}修改端口${PLAIN}"
-        echo -e "${WHITE}  4) ${YELLOW}生成客户端下载链接${PLAIN}"
-        echo -e "${WHITE}  5) ${RED}卸载 FRP${PLAIN}"
-        echo -e "${WHITE}  6) ${CYAN}显示 FRP 信息${PLAIN}"
-        echo -e "${WHITE}  7) ${PURPLE}退出${PLAIN}"
-        read -t 30 -p "请输入数字 [1-7]: " choice
-        if [ -z "$choice" ]; then
-            continue
-        fi
-        case $choice in
-            1)
-                install_dependencies
-                generate_certificates
-                create_server_config
-                create_client_config
-                setup_port_forwarding
-                start_service
-                install_frps
-                echo -e "${GREEN}╭────────────────────────────────────────────────────────────────────╮${PLAIN}"
-                echo -e "${GREEN}│                          ${WHITE}${BOLD}安装完成${PLAIN}${GREEN}                                │${PLAIN}"
-                echo -e "${GREEN}╰────────────────────────────────────────────────────────────────────╯${PLAIN}"
-                generate_download_link
-                exit 0
-                ;;
-            2)
-                uninstall
-                ;;
-            3)
-                new_port=7005
-                change_port $new_port
-                ;;
-            4)
-                generate_download_link
-                ;;
-            5)
-                uninstall_frps
-                ;;
-            6)
-                show_frps_info
-                ;;
-            7)
-                log_warn "已退出"
-                exit 0
-                ;;
-            *)
-                log_error "无效选择，请重新输入"
-                ;;
-        esac
-    done
+
+run_install() {
+    echo -e "${CYAN}╭────────────────────────────────────────────────────────────────────╮${PLAIN}"
+    echo -e "${CYAN}│                       ${WHITE}${BOLD}OpenVPN + FRP 自动安装${PLAIN}${CYAN}                     │${PLAIN}"
+    echo -e "${CYAN}╰────────────────────────────────────────────────────────────────────╯${PLAIN}"
+    
+    install_dependencies
+    generate_certificates
+    create_server_config
+    create_client_config
+    setup_port_forwarding
+    start_service
+    install_frps
+    
+    echo -e "${GREEN}╭────────────────────────────────────────────────────────────────────╮${PLAIN}"
+    echo -e "${GREEN}│                          ${WHITE}${BOLD}安装完成${PLAIN}${GREEN}                                │${PLAIN}"
+    echo -e "${GREEN}╰────────────────────────────────────────────────────────────────────╯${PLAIN}"
+    
+    echo -e "\n${GREEN}${BOLD}=== OpenVPN 信息 ===${PLAIN}"
+    echo -e "${WHITE}• 服务状态:${GREEN} 已启动并运行${PLAIN}"
+    echo -e "${WHITE}• 协议类型:${GREEN} $DEFAULT_PROTOCOL${PLAIN}"
+    echo -e "${WHITE}• 服务端口:${GREEN} $DEFAULT_PORT${PLAIN}"
+    
+    if [ -c /dev/net/tun ]; then
+        echo -e "${WHITE}• TUN设备:${GREEN} 可用${PLAIN}"
+    else
+        echo -e "${WHITE}• TUN设备:${RED} 不可用 - 可能会影响OpenVPN运行${PLAIN}"
+    fi
+    
+    echo -e "\n${GREEN}${BOLD}=== FRPS 信息 ===${PLAIN}"
+    echo -e "${WHITE}• 服务状态:${GREEN} 已启动并运行${PLAIN}"
+    echo -e "${WHITE}• 服务地址:${GREEN} $(curl -s ifconfig.me || hostname -I | awk '{print $1}')${PLAIN}"
+    echo -e "${WHITE}• FRP端口:${GREEN} ${FRPS_PORT}${PLAIN}"
+    echo -e "${WHITE}• 管理界面:${GREEN} http://$(curl -s ifconfig.me || hostname -I | awk '{print $1}'):${FRPS_DASHBOARD_PORT}${PLAIN}"
+    echo -e "${WHITE}• 管理用户:${GREEN} ${FRPS_DASHBOARD_USER}${PLAIN}"
+    echo -e "${WHITE}• 管理密码:${GREEN} ${FRPS_DASHBOARD_PWD}${PLAIN}"
+    
+    echo -e "\n${WHITE}${BOLD}=== 客户端配置文件 ===${PLAIN}"
+    echo -e "${WHITE}• 配置文件路径:${GREEN} $CLIENT_CONFIG${PLAIN}"
+    
+    generate_download_link
 }
-main_menu
+
+run_install
