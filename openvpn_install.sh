@@ -93,17 +93,19 @@ data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC
 data-ciphers-fallback AES-256-CBC
 server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt
-push "redirect-gateway def1"
+push "redirect-gateway def1 bypass-dhcp"
 push "dhcp-option DNS 8.8.8.8"
 push "dhcp-option DNS 8.8.4.4"
 keepalive 10 120
 tls-auth ta.key 0
 remote-cert-tls client
+user nobody
+group nogroup
 persist-key
 persist-tun
 status openvpn-status.log
 log-append openvpn.log
-verb 1
+verb 3
 EOF
 }
 create_client_config() {
@@ -144,7 +146,14 @@ setup_port_forwarding() {
         echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf > /dev/null 2>&1
     fi
     sysctl -p > /dev/null 2>&1
-    PUB_IF=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+    
+    PUB_IF=$(ip -4 route list 0/0 | awk '{print $5; exit}')
+    [ -z "$PUB_IF" ] && PUB_IF=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+    [ -z "$PUB_IF" ] && PUB_IF=$(ip route | grep default | awk '{print $5; exit}')
+    
+    iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE
+    
     cat > /etc/iptables.rules << EOF || error_exit "创建iptables规则文件失败"
 *filter
 :INPUT ACCEPT [0:0]
@@ -163,9 +172,7 @@ COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
     if command -v apt-get >/dev/null 2>&1; then
-        if dpkg -l | grep -q iptables-persistent; then
-            netfilter-persistent save > /dev/null 2>&1
-        else
+        apt-get install -y iptables-persistent > /dev/null 2>&1 || {
             mkdir -p /etc/iptables > /dev/null 2>&1
             cp /etc/iptables.rules /etc/iptables/rules.v4 > /dev/null 2>&1
             cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
@@ -197,7 +204,7 @@ EOF
                     echo "@reboot root iptables-restore < /etc/iptables.rules" > /etc/cron.d/iptables-restore
                 fi
             fi
-        fi
+        }
     elif command -v yum >/dev/null 2>&1; then
         if command -v firewall-cmd >/dev/null 2>&1; then
             firewall-cmd --permanent --direct --passthrough ipv4 -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE > /dev/null 2>&1
@@ -282,6 +289,14 @@ start_service() {
     fi
     
     echo 1 > /proc/sys/net/ipv4/ip_forward
+    sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1
+    
+    PUB_IF=$(ip -4 route list 0/0 | awk '{print $5; exit}')
+    [ -z "$PUB_IF" ] && PUB_IF=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
+    [ -z "$PUB_IF" ] && PUB_IF=$(ip route | grep default | awk '{print $5; exit}')
+    
+    iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE
     
     if $USE_SYSTEMD; then
         if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
