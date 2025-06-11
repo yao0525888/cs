@@ -47,7 +47,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 install_dependencies() {
-    log_step "正在安装依赖..."
+    log_step "正在安装依赖1..."
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update &> /dev/null
         apt-get install -y gnupg2 &> /dev/null
@@ -146,7 +146,6 @@ setup_port_forwarding() {
         echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf > /dev/null 2>&1
     fi
     sysctl -p > /dev/null 2>&1
-    
     PUB_IF=$(ip -4 route list 0/0 | awk '{print $5; exit}')
     [ -z "$PUB_IF" ] && PUB_IF=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
     [ -z "$PUB_IF" ] && PUB_IF=$(ip route | grep default | awk '{print $5; exit}')
@@ -171,50 +170,37 @@ COMMIT
 COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
-    
-    # 确保在系统重启后iptables规则依然生效
     if command -v apt-get >/dev/null 2>&1; then
-        # Debian/Ubuntu系统
         apt-get install -y iptables-persistent > /dev/null 2>&1
         mkdir -p /etc/iptables > /dev/null 2>&1
         cp /etc/iptables.rules /etc/iptables/rules.v4 > /dev/null 2>&1
     elif command -v yum >/dev/null 2>&1; then
-        # CentOS/RHEL系统
         yum install -y iptables-services > /dev/null 2>&1
         cp /etc/iptables.rules /etc/sysconfig/iptables > /dev/null 2>&1
         systemctl enable iptables > /dev/null 2>&1
     fi
-    
-    # 创建通用的systemd服务以确保规则在启动时加载
     cat > /etc/systemd/system/iptables-restore.service << EOF || true
 [Unit]
 Description=Restore iptables rules
 After=network.target
 Before=network-online.target
-
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # 在多个启动点添加规则以增加冗余
     if [ -d /etc/network/if-pre-up.d ]; then
         echo "#!/bin/sh" > /etc/network/if-pre-up.d/iptables
         echo "iptables-restore < /etc/iptables.rules" >> /etc/network/if-pre-up.d/iptables
         chmod +x /etc/network/if-pre-up.d/iptables
     fi
-    
     if [ -d /etc/NetworkManager/dispatcher.d ]; then
         echo "#!/bin/sh" > /etc/NetworkManager/dispatcher.d/99-iptables
         echo "iptables-restore < /etc/iptables.rules" >> /etc/NetworkManager/dispatcher.d/99-iptables
         chmod +x /etc/NetworkManager/dispatcher.d/99-iptables
     fi
-    
-    # rc.local方法作为备用
     if [ -f /etc/rc.local ]; then
         if ! grep -q "iptables-restore" /etc/rc.local; then
             sed -i '/exit 0/i echo 1 > /proc/sys/net/ipv4/ip_forward\niptables-restore < /etc/iptables.rules' /etc/rc.local
@@ -226,8 +212,6 @@ EOF
         echo "exit 0" >> /etc/rc.local
         chmod +x /etc/rc.local
     fi
-    
-    # 对于systemd系统，加载服务
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload > /dev/null 2>&1
         systemctl enable iptables-restore.service > /dev/null 2>&1
@@ -248,17 +232,13 @@ start_service() {
     if command -v systemctl >/dev/null 2>&1 && systemctl --no-pager >/dev/null 2>&1; then
         USE_SYSTEMD=true
     fi
-    
     echo 1 > /proc/sys/net/ipv4/ip_forward
     sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1
-    
     PUB_IF=$(ip -4 route list 0/0 | awk '{print $5; exit}')
     [ -z "$PUB_IF" ] && PUB_IF=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
     [ -z "$PUB_IF" ] && PUB_IF=$(ip route | grep default | awk '{print $5; exit}')
-    
     iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE
-    
     if $USE_SYSTEMD; then
         if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
             OPENVPN_BIN=$(find_openvpn_binary)
@@ -267,7 +247,6 @@ start_service() {
 Description=OpenVPN service for %I
 After=network.target
 After=iptables.service
-
 [Service]
 Type=notify
 PrivateTmp=true
@@ -282,7 +261,6 @@ ProtectHome=true
 KillMode=process
 RestartSec=5s
 Restart=on-failure
-
 [Install]
 WantedBy=multi-user.target
 EOF
