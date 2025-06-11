@@ -8,11 +8,11 @@ PURPLE="\033[35m"
 WHITE="\033[37m"
 BOLD="\033[1m"
 PLAIN="\033[0m"
-log_info() { echo -e "${CYAN}${WHITE}$1${PLAIN}"; }
-log_warn() { echo -e "${YELLOW}${YELLOW}$1${PLAIN}"; }
-log_success() { echo -e "${GREEN}${GREEN}$1${PLAIN}"; }
-log_error() { echo -e "${RED}${RED}$1${PLAIN}" >&2; }
-log_debug() { echo -e "${PURPLE}${PURPLE}$1${PLAIN}"; }
+log_info() { echo -e "${CYAN}${WHITE}${BOLD}$1${PLAIN}"; }
+log_warn() { echo -e "${YELLOW}${YELLOW}${BOLD}$1${PLAIN}"; }
+log_success() { echo -e "${GREEN}${GREEN}${BOLD}$1${PLAIN}"; }
+log_error() { echo -e "${RED}${RED}${BOLD}$1${PLAIN}" >&2; }
+log_debug() { echo -e "${PURPLE}${PURPLE}${BOLD}$1${PLAIN}"; }
 log_step() { echo -e "${WHITE}${WHITE}${BOLD}$1${PLAIN}"; }
 error_exit() {
     log_error "$1"
