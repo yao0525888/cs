@@ -438,10 +438,6 @@ uninstall() {
     iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $(ip route get 8.8.8.8 | awk '{print $5; exit}') -j MASQUERADE 2>/dev/null
     log_success "OpenVPN 和 FRP 已完全卸载，所有相关端口已释放"
 }
-if [[ "$1" == "--uninstall" ]]; then
-    uninstall
-    exit 0
-fi
 change_port() {
     local new_port=$1
     log_step "正在修改端口为 $new_port..."
@@ -455,7 +451,7 @@ generate_download_link() {
     local config_path="/usr/local/openvpn/client.ovpn"
     if [ -f "$config_path" ]; then
         if lsof -i :80 > /dev/null 2>&1; then
-            log_error "错误：80 端口已被占用，请手动复制配置文件"
+            log_error "错误:80 端口已被占用，请手动复制配置文件"
             return 1
         fi
         log_success "客户端配置文件下载链接："
@@ -549,9 +545,9 @@ install_frps() {
     show_frps_info
 }
 show_frps_info() {
-    log_step "FRPS服务状态："
+    log_step "FRPS服务状态:"
     systemctl status frps --no-pager | grep -E 'Active:'
-    log_step "FRPS信息："
+    log_step "FRPS信息:"
     log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
     log_info "FRPS 端口: ${FRPS_PORT}"
     log_info "FRPS 密码: ${FRPS_TOKEN}"
@@ -560,7 +556,7 @@ show_frps_info() {
     log_info "Web管理密码: ${FRPS_DASHBOARD_PWD}"
 }
 show_openvpn_info() {
-    log_step "OpenVPN服务状态："
+    log_step "OpenVPN服务状态:"
     if $USE_SYSTEMD; then
         if systemctl list-unit-files | grep -q openvpn-server@; then
             systemctl status openvpn-server@server --no-pager | grep -E 'Active:'
@@ -570,7 +566,7 @@ show_openvpn_info() {
     else
         ps aux | grep '[o]penvpn'
     fi
-    log_step "OpenVPN配置信息："
+    log_step ""
     log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
     log_info "协议类型: ${DEFAULT_PROTOCOL}"
     log_info "服务端口: ${DEFAULT_PORT}"
@@ -599,7 +595,7 @@ run_install() {
     fi
     echo -e "\n${GREEN}${BOLD}=== FRPS 信息 ===${PLAIN}"
     echo -e "${WHITE}• 服务状态:${GREEN} 已启动并运行${PLAIN}"
-    log_step "FRPS服务状态："
+    log_step "FRPS服务状态:"
     systemctl status frps --no-pager | grep -E 'Active:'
     echo -e "${WHITE}• 服务地址:${GREEN} $(curl -s ifconfig.me || hostname -I | awk '{print $1}')${PLAIN}"
     echo -e "${WHITE}• FRP端口:${GREEN} ${FRPS_PORT}${PLAIN}"
@@ -610,4 +606,48 @@ run_install() {
     echo -e "${WHITE}• 配置文件路径:${GREEN} $CLIENT_CONFIG${PLAIN}"
     generate_download_link
 }
-run_install
+show_menu() {
+    clear
+    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
+    echo -e "${CYAN}|                     ${WHITE}${BOLD}OpenVPN + FRP 安装管理菜单${PLAIN}${CYAN}                   |${PLAIN}"
+    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
+    echo -e ""
+    echo -e "${GREEN}1.${PLAIN} 安装 OpenVPN 和 FRP"
+    echo -e "${RED}2.${PLAIN} 卸载 OpenVPN 和 FRP 并释放端口"
+    echo -e "${YELLOW}0.${PLAIN} 退出脚本"
+    echo -e ""
+    read -rp "请输入选项 [0-2]: " menu_option
+    
+    case $menu_option in
+        1)
+            run_install
+            ;;
+        2)
+            uninstall
+            log_success "卸载完成"
+            sleep 2
+            show_menu
+            ;;
+        0)
+            log_info "退出脚本"
+            exit 0
+            ;;
+        *)
+            log_error "无效的选项，请重新选择"
+            sleep 2
+            show_menu
+            ;;
+    esac
+}
+if [[ "$1" == "--menu" ]]; then
+    show_menu
+elif [[ "$1" == "--install" ]]; then
+    run_install
+elif [[ "$1" == "--uninstall" ]]; then
+    uninstall
+    log_success "卸载完成"
+    sleep 2
+    show_menu
+else
+    show_menu
+fi
