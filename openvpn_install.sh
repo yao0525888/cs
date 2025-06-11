@@ -13,7 +13,7 @@ log_warn() { echo -e "${YELLOW}${YELLOW}$1${PLAIN}"; }
 log_success() { echo -e "${GREEN}${GREEN}$1${PLAIN}"; }
 log_error() { echo -e "${RED}${RED}$1${PLAIN}" >&2; }
 log_debug() { echo -e "${PURPLE}${PURPLE}$1${PLAIN}"; }
-log_step() { echo -e "${BLUE}${BLUE}${BOLD}$1${PLAIN}"; }
+log_step() { echo -e "${WHITE}${WHITE}${BOLD}$1${PLAIN}"; }
 error_exit() {
     log_error "$1"
     exit 1
@@ -551,7 +551,7 @@ show_service_info() {
         ps aux | grep '[o]penvpn'
     fi
     if [ -c /dev/net/tun ]; then
-        log_info "TUN设备: 可用"
+        log_info "TUN设备: 可用" >/dev/null 2>&1
     else
         log_info "TUN设备: 不可用 - 可能会影响OpenVPN运行"
     fi
