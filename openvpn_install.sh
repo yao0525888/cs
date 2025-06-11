@@ -8,12 +8,12 @@ PURPLE="\033[35m"
 WHITE="\033[37m"
 BOLD="\033[1m"
 PLAIN="\033[0m"
-log_info() { echo -e "${CYAN}[$(date "+%Y-%m-%d %H:%M:%S")] [⚠] ${WHITE}$1${PLAIN}"; }
-log_warn() { echo -e "${YELLOW}[$(date "+%Y-%m-%d %H:%M:%S")] [⚠] ${YELLOW}$1${PLAIN}"; }
-log_success() { echo -e "${GREEN}[$(date "+%Y-%m-%d %H:%M:%S")] [✓] ${GREEN}$1${PLAIN}"; }
-log_error() { echo -e "${RED}[$(date "+%Y-%m-%d %H:%M:%S")] [✗] ${RED}$1${PLAIN}" >&2; }
-log_debug() { echo -e "${PURPLE}[$(date "+%Y-%m-%d %H:%M:%S")] [🔍] ${PURPLE}$1${PLAIN}"; }
-log_step() { echo -e "${BLUE}[$(date "+%Y-%m-%d %H:%M:%S")] [➜] ${BLUE}${BOLD}$1${PLAIN}"; }
+log_info() { echo -e "${CYAN} ${WHITE}$1${PLAIN}"; }
+log_warn() { echo -e "${YELLOW} ${YELLOW}$1${PLAIN}"; }
+log_success() { echo -e "${GREEN}[✓] ${GREEN}$1${PLAIN}"; }
+log_error() { echo -e "${RED} ${RED}$1${PLAIN}" >&2; }
+log_debug() { echo -e "${PURPLE} ${PURPLE}$1${PLAIN}"; }
+log_step() { echo -e "${BLUE} ${BLUE}${BOLD}$1${PLAIN}"; }
 error_exit() {
     log_error "$1"
     exit 1
@@ -447,7 +447,6 @@ change_port() {
     log_success "端口已成功修改为 $new_port"
 }
 generate_download_link() {
-    log_step "正在生成客户端下载链接..."
     local config_path="/usr/local/openvpn/client.ovpn"
     if [ -f "$config_path" ]; then
         if lsof -i :80 > /dev/null 2>&1; then
@@ -468,13 +467,11 @@ generate_download_link() {
     fi
 }
 uninstall_frps() {
-    log_step "卸载旧版FRPS服务..."
     systemctl stop frps >/dev/null 2>&1
     systemctl disable frps >/dev/null 2>&1
     rm -f /etc/systemd/system/frps.service
     rm -rf /usr/local/frp /etc/frp
     systemctl daemon-reload >/dev/null 2>&1
-    log_success "旧版FRPS服务已成功卸载"
 }
 install_frps() {
     uninstall_frps
@@ -573,9 +570,6 @@ show_openvpn_info() {
     log_info "客户端配置: ${CLIENT_CONFIG}"
 }
 run_install() {
-    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
-    echo -e "${CYAN}|                       ${WHITE}${BOLD}OpenVPN + FRP 自动安装${PLAIN}${CYAN}                     |${PLAIN}"
-    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
     install_dependencies
     generate_certificates
     create_server_config
