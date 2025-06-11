@@ -99,8 +99,6 @@ push "dhcp-option DNS 8.8.4.4"
 keepalive 10 120
 tls-auth ta.key 0
 remote-cert-tls client
-user nobody
-group nobody
 persist-key
 persist-tun
 status openvpn-status.log
@@ -165,7 +163,9 @@ COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get install -y iptables-persistent > /dev/null 2>&1 || {
+        if dpkg -l | grep -q iptables-persistent; then
+            netfilter-persistent save > /dev/null 2>&1
+        else
             mkdir -p /etc/iptables > /dev/null 2>&1
             cp /etc/iptables.rules /etc/iptables/rules.v4 > /dev/null 2>&1
             cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
@@ -197,7 +197,7 @@ EOF
                     echo "@reboot root iptables-restore < /etc/iptables.rules" > /etc/cron.d/iptables-restore
                 fi
             fi
-        }
+        fi
     elif command -v yum >/dev/null 2>&1; then
         if command -v firewall-cmd >/dev/null 2>&1; then
             firewall-cmd --permanent --direct --passthrough ipv4 -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE > /dev/null 2>&1
