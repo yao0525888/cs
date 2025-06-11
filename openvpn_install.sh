@@ -281,24 +281,183 @@ EOF
 }
 start_service() {
     log_step "正在启动 OpenVPN 服务..."
-    systemctl enable openvpn@server > /dev/null 2>&1 || error_exit "启用 OpenVPN 服务失败"
-    systemctl start openvpn@server > /dev/null 2>&1 || error_exit "启动 OpenVPN 服务失败"
-    if [[ ! -f /etc/systemd/system/openvpn-autostart.service ]]; then
-        cat > /etc/systemd/system/openvpn-autostart.service << EOF || error_exit "创建 OpenVPN 自启动服务文件失败"
+    
+    # 检查OpenVPN配置文件
+    if [ ! -f "/etc/openvpn/server/server.conf" ] && [ -f "$SERVER_CONFIG" ]; then
+        log_info "配置文件需要移动到标准位置..."
+        mkdir -p /etc/openvpn/server/ > /dev/null 2>&1
+        cp "$SERVER_CONFIG" /etc/openvpn/server/server.conf > /dev/null 2>&1
+        cp "$CONFIG_DIR/ca.crt" /etc/openvpn/server/ > /dev/null 2>&1
+        cp "$CONFIG_DIR/server.crt" /etc/openvpn/server/ > /dev/null 2>&1
+        cp "$CONFIG_DIR/server.key" /etc/openvpn/server/ > /dev/null 2>&1
+        cp "$CONFIG_DIR/dh.pem" /etc/openvpn/server/ > /dev/null 2>&1
+        cp "$CONFIG_DIR/ta.key" /etc/openvpn/server/ > /dev/null 2>&1
+    fi
+    
+    # 检查系统使用的初始化系统
+    log_info "检测系统初始化类型..."
+    USE_SYSTEMD=false
+    if command -v systemctl >/dev/null 2>&1 && systemctl --no-pager >/dev/null 2>&1; then
+        USE_SYSTEMD=true
+        log_info "系统使用 systemd"
+    else
+        log_info "系统使用传统init脚本"
+    fi
+    
+    if $USE_SYSTEMD; then
+        # 检查服务文件是否存在
+        if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
+            log_info "未找到标准OpenVPN服务单元文件，尝试创建..."
+            
+            # 根据不同版本创建适当的服务文件
+            if [ -f /usr/sbin/openvpn ]; then
+                OPENVPN_BIN="/usr/sbin/openvpn"
+            elif [ -f /usr/bin/openvpn ]; then
+                OPENVPN_BIN="/usr/bin/openvpn"
+            else
+                error_exit "未找到OpenVPN二进制文件"
+            fi
+            
+            # 尝试创建服务文件
+            cat > /etc/systemd/system/openvpn-server@.service << EOF
 [Unit]
-Description=OpenVPN Auto Start Service
+Description=OpenVPN service for %I
 After=network.target
 
 [Service]
-Type=oneshot
-ExecStart=/bin/bash -c "systemctl start openvpn@server"
-RemainAfterExit=yes
+Type=notify
+PrivateTmp=true
+ExecStart=$OPENVPN_BIN --status /var/log/openvpn/%i-status.log --status-version 2 --suppress-timestamps --config /etc/openvpn/server/%i.conf
+WorkingDirectory=/etc/openvpn/server
+LimitNPROC=10
+DeviceAllow=/dev/null rw
+DeviceAllow=/dev/net/tun rw
+ProtectSystem=true
+ProtectHome=true
+KillMode=process
+RestartSec=5s
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl daemon-reload
-        systemctl enable openvpn-autostart >/dev/null 2>&1 || error_exit "启用 OpenVPN 自启动服务失败"
+            log_info "已创建自定义OpenVPN服务单元文件"
+            mkdir -p /var/log/openvpn > /dev/null 2>&1
+        fi
+        
+        # 尝试确定正确的服务名称
+        if systemctl list-unit-files | grep -q openvpn-server@; then
+            SERVICE_NAME="openvpn-server@server"
+        else
+            SERVICE_NAME="openvpn@server"
+        fi
+        
+        # 重新加载systemd配置
+        log_info "重新加载systemd配置..."
+        systemctl daemon-reload > /dev/null 2>&1
+        
+        # 启用并启动服务
+        log_info "启用并启动服务: $SERVICE_NAME"
+        systemctl enable $SERVICE_NAME > /dev/null 2>&1
+        
+        # 尝试启动服务，如果失败则获取详细错误信息
+        if ! systemctl restart $SERVICE_NAME > /dev/null 2>&1; then
+            log_error "启动OpenVPN服务失败，查看错误信息:"
+            systemctl status $SERVICE_NAME --no-pager
+            log_warn "尝试替代启动方法..."
+            
+            # 尝试直接启动OpenVPN
+            log_info "尝试直接启动OpenVPN..."
+            if [ -f /etc/openvpn/server/server.conf ]; then
+                nohup $OPENVPN_BIN --config /etc/openvpn/server/server.conf > /var/log/openvpn-direct.log 2>&1 &
+                sleep 2
+                if pgrep -x openvpn > /dev/null; then
+                    log_success "OpenVPN已直接启动"
+                    
+                    # 创建开机自启动脚本
+                    if [ -d /etc/rc.d ]; then
+                        echo "#!/bin/bash" > /etc/rc.d/rc.openvpn
+                        echo "$OPENVPN_BIN --config /etc/openvpn/server/server.conf --daemon" >> /etc/rc.d/rc.openvpn
+                        chmod +x /etc/rc.d/rc.openvpn
+                    elif [ -f /etc/rc.local ]; then
+                        sed -i '/exit 0/i '$OPENVPN_BIN' --config /etc/openvpn/server/server.conf --daemon' /etc/rc.local
+                    else
+                        echo "#!/bin/sh" > /etc/rc.local
+                        echo "$OPENVPN_BIN --config /etc/openvpn/server/server.conf --daemon" >> /etc/rc.local
+                        echo "exit 0" >> /etc/rc.local
+                        chmod +x /etc/rc.local
+                    fi
+                else
+                    error_exit "无法启动OpenVPN，请查看日志：/var/log/openvpn-direct.log"
+                fi
+            else
+                error_exit "找不到OpenVPN配置文件"
+            fi
+        else
+            log_success "OpenVPN服务已成功启动"
+        fi
+    else
+        # 非systemd系统的处理
+        if [ -f /etc/init.d/openvpn ]; then
+            log_info "使用init脚本启动OpenVPN..."
+            update-rc.d openvpn enable > /dev/null 2>&1 || chkconfig openvpn on > /dev/null 2>&1
+            /etc/init.d/openvpn restart > /dev/null 2>&1
+            if [ $? -ne 0 ]; then
+                log_error "通过init脚本启动OpenVPN失败，尝试替代方法..."
+                if [ -f /usr/sbin/openvpn ]; then
+                    OPENVPN_BIN="/usr/sbin/openvpn"
+                elif [ -f /usr/bin/openvpn ]; then
+                    OPENVPN_BIN="/usr/bin/openvpn"
+                else
+                    error_exit "未找到OpenVPN二进制文件"
+                fi
+                
+                nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
+                sleep 2
+                if pgrep -x openvpn > /dev/null; then
+                    log_success "OpenVPN已直接启动"
+                else
+                    error_exit "无法启动OpenVPN，请查看日志：/var/log/openvpn-direct.log"
+                fi
+            else
+                log_success "OpenVPN服务已通过init脚本启动"
+            fi
+        else
+            # 无法找到初始化脚本，尝试直接启动
+            log_warn "找不到OpenVPN初始化脚本，尝试直接启动..."
+            if [ -f /usr/sbin/openvpn ]; then
+                OPENVPN_BIN="/usr/sbin/openvpn"
+            elif [ -f /usr/bin/openvpn ]; then
+                OPENVPN_BIN="/usr/bin/openvpn"
+            else
+                error_exit "未找到OpenVPN二进制文件"
+            fi
+            
+            nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
+            sleep 2
+            if pgrep -x openvpn > /dev/null; then
+                log_success "OpenVPN已直接启动"
+                
+                # 创建开机自启动脚本
+                if [ -d /etc/rc.d ]; then
+                    echo "#!/bin/bash" > /etc/rc.d/rc.openvpn
+                    echo "$OPENVPN_BIN --config $SERVER_CONFIG --daemon" >> /etc/rc.d/rc.openvpn
+                    chmod +x /etc/rc.d/rc.openvpn
+                elif [ -f /etc/rc.local ]; then
+                    sed -i '/exit 0/i '$OPENVPN_BIN' --config '$SERVER_CONFIG' --daemon' /etc/rc.local
+                fi
+            else
+                error_exit "无法启动OpenVPN，请查看日志：/var/log/openvpn-direct.log"
+            fi
+        fi
+    fi
+    
+    # 检查OpenVPN是否真的在运行
+    sleep 3
+    if pgrep -x openvpn > /dev/null; then
+        log_success "OpenVPN服务已成功运行"
+    else
+        log_error "警告：OpenVPN服务似乎未运行，请手动检查"
     fi
 }
 uninstall() {
