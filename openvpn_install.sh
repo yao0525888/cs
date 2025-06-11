@@ -161,7 +161,16 @@ COMMIT
 COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
-    cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
+    
+    # 检查系统类型并相应地处理iptables持久化
+    if command -v apt-get >/dev/null 2>&1; then
+        # Debian/Ubuntu系统
+        if dpkg -l | grep -q iptables-persistent; then
+            log_info "已安装iptables-persistent，保存规则..."
+            netfilter-persistent save > /dev/null 2>&1
+        else
+            # 创建自定义服务
+            cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
 [Unit]
 Description=Restore iptables rules
 After=network.target
@@ -174,8 +183,101 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable iptables > /dev/null 2>&1 || error_exit "启用iptables服务失败"
+            systemctl daemon-reload > /dev/null 2>&1
+            systemctl enable iptables > /dev/null 2>&1 && systemctl start iptables > /dev/null 2>&1
+            if [ $? -ne 0 ]; then
+                log_warn "无法启用自定义iptables服务，尝试替代方法..."
+                # 备份方案：在启动时加载规则
+                if [ -d /etc/network/if-pre-up.d ]; then
+                    echo "#!/bin/sh" > /etc/network/if-pre-up.d/iptables
+                    echo "iptables-restore < /etc/iptables.rules" >> /etc/network/if-pre-up.d/iptables
+                    chmod +x /etc/network/if-pre-up.d/iptables
+                    log_success "已设置网络启动时加载iptables规则"
+                elif [ -d /etc/NetworkManager/dispatcher.d ]; then
+                    echo "#!/bin/sh" > /etc/NetworkManager/dispatcher.d/99-iptables
+                    echo "iptables-restore < /etc/iptables.rules" >> /etc/NetworkManager/dispatcher.d/99-iptables
+                    chmod +x /etc/NetworkManager/dispatcher.d/99-iptables
+                    log_success "已设置NetworkManager启动时加载iptables规则"
+                else
+                    echo "@reboot root iptables-restore < /etc/iptables.rules" > /etc/cron.d/iptables-restore
+                    log_success "已设置系统启动时通过cron加载iptables规则"
+                fi
+            else
+                log_success "iptables服务已启用"
+            fi
+        fi
+    elif command -v yum >/dev/null 2>&1; then
+        # CentOS/RHEL系统
+        if command -v firewall-cmd >/dev/null 2>&1; then
+            log_info "检测到firewalld，使用firewalld配置..."
+            firewall-cmd --permanent --direct --passthrough ipv4 -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE > /dev/null 2>&1
+            firewall-cmd --permanent --add-masquerade > /dev/null 2>&1
+            firewall-cmd --reload > /dev/null 2>&1
+            log_success "已通过firewalld启用IP转发和伪装"
+        else
+            # 如果使用传统iptables
+            if command -v chkconfig >/dev/null 2>&1; then
+                chkconfig iptables on > /dev/null 2>&1
+            else
+                systemctl enable iptables > /dev/null 2>&1 || {
+                    # 创建自定义服务
+                    cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
+[Unit]
+Description=Restore iptables rules
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables-restore /etc/iptables.rules
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                    systemctl daemon-reload > /dev/null 2>&1
+                    systemctl enable iptables > /dev/null 2>&1 || {
+                        echo "#!/bin/bash" > /etc/rc.d/rc.local
+                        echo "iptables-restore < /etc/iptables.rules" >> /etc/rc.d/rc.local
+                        chmod +x /etc/rc.d/rc.local
+                        log_success "已设置系统启动时通过rc.local加载iptables规则"
+                    }
+                }
+            fi
+            service iptables save > /dev/null 2>&1
+            log_success "iptables规则已保存"
+        fi
+    else
+        # 其他系统的通用方法
+        cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
+[Unit]
+Description=Restore iptables rules
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables-restore /etc/iptables.rules
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload > /dev/null 2>&1
+        if ! systemctl enable iptables > /dev/null 2>&1; then
+            log_warn "无法启用iptables服务，使用替代方法..."
+            if [ -f /etc/rc.local ]; then
+                sed -i '/exit 0/i iptables-restore < /etc/iptables.rules' /etc/rc.local
+            else
+                echo "#!/bin/sh" > /etc/rc.local
+                echo "iptables-restore < /etc/iptables.rules" >> /etc/rc.local
+                echo "exit 0" >> /etc/rc.local
+                chmod +x /etc/rc.local
+            fi
+            log_success "已设置系统启动时通过rc.local加载iptables规则"
+        else
+            systemctl start iptables > /dev/null 2>&1
+            log_success "iptables服务已启用"
+        fi
+    fi
 }
 start_service() {
     log_step "正在启动 OpenVPN 服务..."
