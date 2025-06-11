@@ -54,7 +54,6 @@ install_dependencies() {
     else
         error_exit "不支持的操作系统，无法安装OpenVPN依赖。"
     fi
-    log_success "OpenVPN 依赖安装完成"
 }
 generate_certificates() {
     log_step "正在生成证书..."
@@ -162,11 +161,8 @@ COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
     
-    # 检查系统类型并相应地处理iptables持久化
     if command -v apt-get >/dev/null 2>&1; then
-        # Debian/Ubuntu系统
         if dpkg -l | grep -q iptables-persistent; then
-            log_info "已安装iptables-persistent，保存规则..."
             netfilter-persistent save > /dev/null 2>&1
         else
             # 创建自定义服务
