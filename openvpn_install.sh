@@ -605,13 +605,28 @@ run_install() {
     show_service_info
     generate_download_link
 }
+show_config_link() {
+    if [ -f "$CLIENT_CONFIG" ]; then
+        clear
+        echo -e "OpenVPN 配置文件链接"
+        echo -e "${CYAN}${BOLD}客户端配置文件信息:${PLAIN}"
+        generate_download_link
+        read -rp "按任意键返回主菜单..." -n1 -s
+        show_menu
+    else
+        log_error "未找到OpenVPN客户端配置文件，请先安装OpenVPN"
+        sleep 2
+        show_menu
+    fi
+}
 show_menu() {
     clear
     echo -e "${WHITE}${BOLD}OpenVPN + FRP 安装管理菜单${PLAIN}${CYAN}"
     echo -e "${GREEN}1.${PLAIN} 安装 OpenVPN 和 FRP"
     echo -e "${GREEN}2.${PLAIN} 卸载 OpenVPN 和 FRP"
-    echo -e "${GREEN}3.${PLAIN} 退出脚本"
-    read -rp "请输入选项 [1-3]: " menu_option
+    echo -e "${GREEN}3.${PLAIN} 查看 OpenVPN 配置链接"
+    echo -e "${GREEN}4.${PLAIN} 退出脚本"
+    read -rp "请输入选项 [1-4]: " menu_option
     case $menu_option in
         1)
             run_install
@@ -627,6 +642,9 @@ show_menu() {
             show_menu
             ;;
         3)
+            show_config_link
+            ;;
+        4)
             log_info "退出脚本"
             exit 2
             ;;
