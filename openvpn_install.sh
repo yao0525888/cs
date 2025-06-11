@@ -18,6 +18,15 @@ error_exit() {
     log_error "$1"
     exit 1
 }
+find_openvpn_binary() {
+    if [ -f /usr/sbin/openvpn ]; then
+        echo "/usr/sbin/openvpn"
+    elif [ -f /usr/bin/openvpn ]; then
+        echo "/usr/bin/openvpn"
+    else
+        error_exit "未找到OpenVPN二进制文件"
+    fi
+}
 DEFAULT_PORT=7005
 DEFAULT_PROTOCOL="udp"
 SERVER_IP=$(curl -s ifconfig.me)
@@ -100,7 +109,6 @@ verb 1
 EOF
 }
 create_client_config() {
-    log_step "正在创建客户端配置..."
     cat > $CLIENT_CONFIG << EOF || error_exit "创建客户端配置文件失败"
 client
 dev tun
@@ -262,13 +270,7 @@ start_service() {
     fi
     if $USE_SYSTEMD; then
         if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
-            if [ -f /usr/sbin/openvpn ]; then
-                OPENVPN_BIN="/usr/sbin/openvpn"
-            elif [ -f /usr/bin/openvpn ]; then
-                OPENVPN_BIN="/usr/bin/openvpn"
-            else
-                error_exit "未找到OpenVPN二进制文件"
-            fi
+            OPENVPN_BIN=$(find_openvpn_binary)
             cat > /etc/systemd/system/openvpn-server@.service << EOF
 [Unit]
 Description=OpenVPN service for %I
@@ -327,13 +329,7 @@ EOF
             update-rc.d openvpn enable > /dev/null 2>&1 || chkconfig openvpn on > /dev/null 2>&1
             /etc/init.d/openvpn restart > /dev/null 2>&1
             if [ $? -ne 0 ]; then
-                if [ -f /usr/sbin/openvpn ]; then
-                    OPENVPN_BIN="/usr/sbin/openvpn"
-                elif [ -f /usr/bin/openvpn ]; then
-                    OPENVPN_BIN="/usr/bin/openvpn"
-                else
-                    error_exit "未找到OpenVPN二进制文件"
-                fi
+                OPENVPN_BIN=$(find_openvpn_binary)
                 nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
                 sleep 2
                 if ! pgrep -x openvpn > /dev/null; then
@@ -341,13 +337,7 @@ EOF
                 fi
             fi
         else
-            if [ -f /usr/sbin/openvpn ]; then
-                OPENVPN_BIN="/usr/sbin/openvpn"
-            elif [ -f /usr/bin/openvpn ]; then
-                OPENVPN_BIN="/usr/bin/openvpn"
-            else
-                error_exit "未找到OpenVPN二进制文件"
-            fi
+            OPENVPN_BIN=$(find_openvpn_binary)
             nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
             sleep 2
             if pgrep -x openvpn > /dev/null; then
@@ -409,14 +399,14 @@ uninstall() {
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload >/dev/null 2>&1
     fi
-    pkill -9 openvpn >/dev/null 2>&1
-    pkill -9 frps >/dev/null 2>&1
+    { pkill -9 openvpn || true; } >/dev/null 2>&1
+    { pkill -9 frps || true; } >/dev/null 2>&1
     for port in $DEFAULT_PORT $FRPS_PORT $FRPS_KCP_PORT $FRPS_DASHBOARD_PORT 80; do
         local pid=$(lsof -t -i :$port 2>/dev/null)
         if [ -n "$pid" ]; then
-            kill $pid >/dev/null 2>&1
+            { kill $pid || true; } >/dev/null 2>&1
             sleep 1
-            kill -9 $pid >/dev/null 2>&1 2>/dev/null
+            { kill -9 $pid || true; } >/dev/null 2>&1
         fi
         if command -v firewall-cmd >/dev/null 2>&1; then
             firewall-cmd --permanent --remove-port=$port/tcp >/dev/null 2>&1
@@ -433,8 +423,7 @@ uninstall() {
         sed -i '/^net.ipv4.ip_forward=1/d' /etc/sysctl.conf
         sysctl -p >/dev/null 2>&1
     fi
-    iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $(ip route get 8.8.8.8 | awk '{print $5; exit}') -j MASQUERADE 2>/dev/null
-    log_success "OpenVPN 和 FRP 已完全卸载。"
+    { iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $(ip route get 8.8.8.8 | awk '{print $5; exit}') -j MASQUERADE || true; } 2>/dev/null
 }
 change_port() {
     local new_port=$1
@@ -588,7 +577,8 @@ show_menu() {
             run_install
             ;;
         2)
-            uninstall
+            log_step "正在卸载 OpenVPN 和 FRP..."
+            { uninstall > /dev/null 2>&1; } || true
             log_success "卸载完成"
             sleep 3
             show_menu
@@ -609,7 +599,8 @@ if [[ "$1" == "--menu" ]]; then
 elif [[ "$1" == "--install" ]]; then
     run_install
 elif [[ "$1" == "--uninstall" ]]; then
-    uninstall
+    log_step "正在卸载 OpenVPN 和 FRP..."
+    { uninstall > /dev/null 2>&1; } || true
     log_success "卸载完成"
     sleep 2
     show_menu
