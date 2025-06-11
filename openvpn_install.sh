@@ -578,7 +578,10 @@ show_menu() {
             ;;
         2)
             log_step "正在卸载 OpenVPN 和 FRP..."
-            { uninstall > /dev/null 2>&1; } || true
+            exec 3>&2 # 保存stderr
+            exec 2>/dev/null # 重定向stderr到/dev/null
+            { uninstall || true; } > /dev/null # 静默执行卸载函数
+            exec 2>&3 # 恢复stderr
             log_success "卸载完成"
             sleep 3
             show_menu
@@ -600,7 +603,10 @@ elif [[ "$1" == "--install" ]]; then
     run_install
 elif [[ "$1" == "--uninstall" ]]; then
     log_step "正在卸载 OpenVPN 和 FRP..."
-    { uninstall > /dev/null 2>&1; } || true
+    exec 3>&2
+    exec 2>/dev/null
+    { uninstall || true; } > /dev/null
+    exec 2>&3
     log_success "卸载完成"
     sleep 2
     show_menu
