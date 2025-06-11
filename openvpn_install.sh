@@ -537,7 +537,6 @@ install_frps() {
         error_exit "启用并启动FRPS服务失败"
     fi
     log_success "FRPS安装成功"
-    show_service_info
 }
 show_service_info() {
     log_step "OpenVPN & FRPS服务状态:"
