@@ -47,7 +47,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 install_dependencies() {
-    log_step "正在安装依赖1..."
+    log_step "正在安装依赖..."
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update &> /dev/null
         apt-get install -y gnupg2 &> /dev/null
