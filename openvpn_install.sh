@@ -540,7 +540,7 @@ install_frps() {
     show_service_info
 }
 show_service_info() {
-    log_step "OpenVPN&FRPS服务状态:"
+    log_step "OpenVPN & FRPS服务状态:"
     systemctl status frps --no-pager | grep -E 'Active:'
     if $USE_SYSTEMD; then
         if systemctl list-unit-files | grep -q openvpn-server@; then
