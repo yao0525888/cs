@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 RED="\033[31m"
 GREEN="\033[32m\033[01m"
 YELLOW="\033[33m\033[01m"
@@ -8,14 +8,12 @@ PURPLE="\033[35m"
 WHITE="\033[37m"
 BOLD="\033[1m"
 PLAIN="\033[0m"
-
 log_info() { echo -e "${CYAN}[$(date "+%Y-%m-%d %H:%M:%S")] [ℹ] ${WHITE}$1${PLAIN}"; }
 log_warn() { echo -e "${YELLOW}[$(date "+%Y-%m-%d %H:%M:%S")] [⚠] ${YELLOW}$1${PLAIN}"; }
 log_success() { echo -e "${GREEN}[$(date "+%Y-%m-%d %H:%M:%S")] [✓] ${GREEN}$1${PLAIN}"; }
 log_error() { echo -e "${RED}[$(date "+%Y-%m-%d %H:%M:%S")] [✗] ${RED}$1${PLAIN}" >&2; }
 log_debug() { echo -e "${PURPLE}[$(date "+%Y-%m-%d %H:%M:%S")] [🔍] ${PURPLE}$1${PLAIN}"; }
 log_step() { echo -e "${BLUE}[$(date "+%Y-%m-%d %H:%M:%S")] [➜] ${BLUE}${BOLD}$1${PLAIN}"; }
-
 error_exit() {
     log_error "$1"
     exit 1
@@ -117,7 +115,6 @@ data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC
 data-ciphers-fallback AES-256-CBC
 remote-cert-tls server
 verb 1
-
 <ca>
 $(cat $CONFIG_DIR/easy-rsa/pki/ca.crt)
 </ca>
@@ -150,7 +147,6 @@ setup_port_forwarding() {
 -A FORWARD -i tun0 -o ${PUB_IF} -j ACCEPT
 -A FORWARD -i ${PUB_IF} -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 COMMIT
-
 *nat
 :PREROUTING ACCEPT [0:0]
 :INPUT ACCEPT [0:0]
@@ -160,7 +156,6 @@ COMMIT
 COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
-    
     if command -v apt-get >/dev/null 2>&1; then
         if dpkg -l | grep -q iptables-persistent; then
             netfilter-persistent save > /dev/null 2>&1
@@ -169,12 +164,10 @@ EOF
 [Unit]
 Description=Restore iptables rules
 After=network.target
-
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -208,12 +201,10 @@ EOF
 [Unit]
 Description=Restore iptables rules
 After=network.target
-
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -232,12 +223,10 @@ EOF
 [Unit]
 Description=Restore iptables rules
 After=network.target
-
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -258,7 +247,6 @@ EOF
 }
 start_service() {
     log_step "正在启动 OpenVPN 服务..."
-    
     if [ ! -f "/etc/openvpn/server/server.conf" ] && [ -f "$SERVER_CONFIG" ]; then
         mkdir -p /etc/openvpn/server/ > /dev/null 2>&1
         cp "$SERVER_CONFIG" /etc/openvpn/server/server.conf > /dev/null 2>&1
@@ -268,12 +256,10 @@ start_service() {
         cp "$CONFIG_DIR/dh.pem" /etc/openvpn/server/ > /dev/null 2>&1
         cp "$CONFIG_DIR/ta.key" /etc/openvpn/server/ > /dev/null 2>&1
     fi
-    
     USE_SYSTEMD=false
     if command -v systemctl >/dev/null 2>&1 && systemctl --no-pager >/dev/null 2>&1; then
         USE_SYSTEMD=true
     fi
-    
     if $USE_SYSTEMD; then
         if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
             if [ -f /usr/sbin/openvpn ]; then
@@ -283,12 +269,10 @@ start_service() {
             else
                 error_exit "未找到OpenVPN二进制文件"
             fi
-            
             cat > /etc/systemd/system/openvpn-server@.service << EOF
 [Unit]
 Description=OpenVPN service for %I
 After=network.target
-
 [Service]
 Type=notify
 PrivateTmp=true
@@ -302,22 +286,18 @@ ProtectHome=true
 KillMode=process
 RestartSec=5s
 Restart=on-failure
-
 [Install]
 WantedBy=multi-user.target
 EOF
             mkdir -p /var/log/openvpn > /dev/null 2>&1
         fi
-        
         if systemctl list-unit-files | grep -q openvpn-server@; then
             SERVICE_NAME="openvpn-server@server"
         else
             SERVICE_NAME="openvpn@server"
         fi
-        
         systemctl daemon-reload > /dev/null 2>&1
         systemctl enable $SERVICE_NAME > /dev/null 2>&1
-        
         if ! systemctl restart $SERVICE_NAME > /dev/null 2>&1; then
             if [ -f /etc/openvpn/server/server.conf ]; then
                 nohup $OPENVPN_BIN --config /etc/openvpn/server/server.conf > /var/log/openvpn-direct.log 2>&1 &
@@ -354,7 +334,6 @@ EOF
                 else
                     error_exit "未找到OpenVPN二进制文件"
                 fi
-                
                 nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
                 sleep 2
                 if ! pgrep -x openvpn > /dev/null; then
@@ -369,7 +348,6 @@ EOF
             else
                 error_exit "未找到OpenVPN二进制文件"
             fi
-            
             nohup $OPENVPN_BIN --config $SERVER_CONFIG --daemon > /var/log/openvpn-direct.log 2>&1
             sleep 2
             if pgrep -x openvpn > /dev/null; then
@@ -385,36 +363,85 @@ EOF
             fi
         fi
     fi
-    
     sleep 3
     if ! pgrep -x openvpn > /dev/null; then
         error_exit "OpenVPN服务启动失败"
     fi
 }
 uninstall() {
-    log_step "正在卸载 OpenVPN..."
-    systemctl stop openvpn@server > /dev/null 2>&1
-    systemctl disable openvpn@server > /dev/null 2>&1
-    systemctl disable openvpn-autostart > /dev/null 2>&1
-    rm -f /etc/systemd/system/openvpn-autostart.service > /dev/null 2>&1
-    systemctl stop iptables > /dev/null 2>&1
-    systemctl disable iptables > /dev/null 2>&1
-    rm -f /etc/systemd/system/iptables.service > /dev/null 2>&1
-    rm -f /etc/iptables.rules > /dev/null 2>&1
-    apt-get remove -y openvpn > /dev/null 2>&1
-    rm -rf /usr/local/openvpn > /dev/null 2>&1
-    systemctl daemon-reload > /dev/null 2>&1
-    for port in $DEFAULT_PORT 80; do
-        local pid=$(lsof -t -i :$port)
+    log_step "正在卸载 OpenVPN 和 FRP..."
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop openvpn@server >/dev/null 2>&1
+        systemctl stop openvpn-server@server >/dev/null 2>&1
+        systemctl disable openvpn@server >/dev/null 2>&1
+        systemctl disable openvpn-server@server >/dev/null 2>&1
+        systemctl disable openvpn-autostart >/dev/null 2>&1
+        rm -f /etc/systemd/system/openvpn-autostart.service >/dev/null 2>&1
+        rm -f /etc/systemd/system/openvpn-server@.service >/dev/null 2>&1
+    else
+        /etc/init.d/openvpn stop >/dev/null 2>&1
+        update-rc.d openvpn disable >/dev/null 2>&1 || chkconfig openvpn off >/dev/null 2>&1
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop frps >/dev/null 2>&1
+        systemctl disable frps >/dev/null 2>&1
+        rm -f /etc/systemd/system/frps.service >/dev/null 2>&1
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop iptables >/dev/null 2>&1
+        systemctl disable iptables >/dev/null 2>&1
+        rm -f /etc/systemd/system/iptables.service >/dev/null 2>&1
+    fi
+    rm -f /etc/iptables.rules >/dev/null 2>&1
+    rm -rf /usr/local/openvpn >/dev/null 2>&1
+    rm -rf /usr/local/frp >/dev/null 2>&1
+    rm -rf /etc/frp >/dev/null 2>&1
+    rm -rf /etc/openvpn >/dev/null 2>&1
+    rm -f /etc/rc.d/rc.openvpn >/dev/null 2>&1
+    rm -f /etc/network/if-pre-up.d/iptables >/dev/null 2>&1
+    rm -f /etc/NetworkManager/dispatcher.d/99-iptables >/dev/null 2>&1
+    rm -f /etc/cron.d/iptables-restore >/dev/null 2>&1
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get remove -y openvpn >/dev/null 2>&1
+    elif command -v yum >/dev/null 2>&1; then
+        yum remove -y openvpn >/dev/null 2>&1
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1
+    fi
+    pkill -9 openvpn >/dev/null 2>&1
+    pkill -9 frps >/dev/null 2>&1
+    log_step "释放所有相关端口..."
+    for port in $DEFAULT_PORT $FRPS_PORT $FRPS_KCP_PORT $FRPS_DASHBOARD_PORT 80; do
+        local pid=$(lsof -t -i :$port 2>/dev/null)
         if [ -n "$pid" ]; then
-            kill $pid > /dev/null 2>&1
+            log_info "释放端口 $port..."
+            kill $pid >/dev/null 2>&1
             sleep 1
-            if ps -p $pid > /dev/null 2>&1; then
-                kill -9 $pid > /dev/null 2>&1
-            fi
+            kill -9 $pid >/dev/null 2>&1 2>/dev/null
         fi
+        if command -v firewall-cmd >/dev/null 2>&1; then
+            firewall-cmd --permanent --remove-port=$port/tcp >/dev/null 2>&1
+            firewall-cmd --permanent --remove-port=$port/udp >/dev/null 2>&1
+        fi
+        if command -v ufw >/dev/null 2>&1; then
+            ufw delete allow $port/tcp >/dev/null 2>&1
+            ufw delete allow $port/udp >/dev/null 2>&1
+        fi
+        iptables -D INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null
+        iptables -D INPUT -p udp --dport $port -j ACCEPT 2>/dev/null
     done
+    if grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf; then
+        sed -i '/^net.ipv4.ip_forward=1/d' /etc/sysctl.conf
+        sysctl -p >/dev/null 2>&1
+    fi
+    iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $(ip route get 8.8.8.8 | awk '{print $5; exit}') -j MASQUERADE 2>/dev/null
+    log_success "OpenVPN 和 FRP 已完全卸载，所有相关端口已释放"
 }
+if [[ "$1" == "--uninstall" ]]; then
+    uninstall
+    exit 0
+fi
 change_port() {
     local new_port=$1
     log_step "正在修改端口为 $new_port..."
@@ -532,12 +559,27 @@ show_frps_info() {
     log_info "Web管理用户名: ${FRPS_DASHBOARD_USER}"
     log_info "Web管理密码: ${FRPS_DASHBOARD_PWD}"
 }
-
+show_openvpn_info() {
+    log_step "OpenVPN服务状态："
+    if $USE_SYSTEMD; then
+        if systemctl list-unit-files | grep -q openvpn-server@; then
+            systemctl status openvpn-server@server --no-pager | grep -E 'Active:'
+        else
+            systemctl status openvpn@server --no-pager | grep -E 'Active:'
+        fi
+    else
+        ps aux | grep '[o]penvpn'
+    fi
+    log_step "OpenVPN配置信息："
+    log_info "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+    log_info "协议类型: ${DEFAULT_PROTOCOL}"
+    log_info "服务端口: ${DEFAULT_PORT}"
+    log_info "客户端配置: ${CLIENT_CONFIG}"
+}
 run_install() {
-    echo -e "${CYAN}╭────────────────────────────────────────────────────────────────────╮${PLAIN}"
-    echo -e "${CYAN}│                       ${WHITE}${BOLD}OpenVPN + FRP 自动安装${PLAIN}${CYAN}                     │${PLAIN}"
-    echo -e "${CYAN}╰────────────────────────────────────────────────────────────────────╯${PLAIN}"
-    
+    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
+    echo -e "${CYAN}|                       ${WHITE}${BOLD}OpenVPN + FRP 自动安装${PLAIN}${CYAN}                     |${PLAIN}"
+    echo -e "${CYAN}+---------------------------------------------------------------------+${PLAIN}"
     install_dependencies
     generate_certificates
     create_server_config
@@ -545,34 +587,27 @@ run_install() {
     setup_port_forwarding
     start_service
     install_frps
-    
-    echo -e "${GREEN}╭────────────────────────────────────────────────────────────────────╮${PLAIN}"
-    echo -e "${GREEN}│                          ${WHITE}${BOLD}安装完成${PLAIN}${GREEN}                                │${PLAIN}"
-    echo -e "${GREEN}╰────────────────────────────────────────────────────────────────────╯${PLAIN}"
-    
+    echo -e "${GREEN}+---------------------------------------------------------------------+${PLAIN}"
+    echo -e "${GREEN}|                          ${WHITE}${BOLD}安装完成${PLAIN}${GREEN}                                |${PLAIN}"
+    echo -e "${GREEN}+---------------------------------------------------------------------+${PLAIN}"
     echo -e "\n${GREEN}${BOLD}=== OpenVPN 信息 ===${PLAIN}"
-    echo -e "${WHITE}• 服务状态:${GREEN} 已启动并运行${PLAIN}"
-    echo -e "${WHITE}• 协议类型:${GREEN} $DEFAULT_PROTOCOL${PLAIN}"
-    echo -e "${WHITE}• 服务端口:${GREEN} $DEFAULT_PORT${PLAIN}"
-    
+    show_openvpn_info
     if [ -c /dev/net/tun ]; then
         echo -e "${WHITE}• TUN设备:${GREEN} 可用${PLAIN}"
     else
         echo -e "${WHITE}• TUN设备:${RED} 不可用 - 可能会影响OpenVPN运行${PLAIN}"
     fi
-    
     echo -e "\n${GREEN}${BOLD}=== FRPS 信息 ===${PLAIN}"
     echo -e "${WHITE}• 服务状态:${GREEN} 已启动并运行${PLAIN}"
+    log_step "FRPS服务状态："
+    systemctl status frps --no-pager | grep -E 'Active:'
     echo -e "${WHITE}• 服务地址:${GREEN} $(curl -s ifconfig.me || hostname -I | awk '{print $1}')${PLAIN}"
     echo -e "${WHITE}• FRP端口:${GREEN} ${FRPS_PORT}${PLAIN}"
     echo -e "${WHITE}• 管理界面:${GREEN} http://$(curl -s ifconfig.me || hostname -I | awk '{print $1}'):${FRPS_DASHBOARD_PORT}${PLAIN}"
     echo -e "${WHITE}• 管理用户:${GREEN} ${FRPS_DASHBOARD_USER}${PLAIN}"
     echo -e "${WHITE}• 管理密码:${GREEN} ${FRPS_DASHBOARD_PWD}${PLAIN}"
-    
     echo -e "\n${WHITE}${BOLD}=== 客户端配置文件 ===${PLAIN}"
     echo -e "${WHITE}• 配置文件路径:${GREEN} $CLIENT_CONFIG${PLAIN}"
-    
     generate_download_link
 }
-
 run_install
