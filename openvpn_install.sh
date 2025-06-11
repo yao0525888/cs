@@ -592,6 +592,7 @@ show_menu() {
         2)
             uninstall
             log_success "卸载完成"
+            sleep 3
             show_menu
             ;;
         3)
