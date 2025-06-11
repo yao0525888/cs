@@ -100,7 +100,7 @@ keepalive 10 120
 tls-auth ta.key 0
 remote-cert-tls client
 user nobody
-group nogroup
+group nobody
 persist-key
 persist-tun
 status openvpn-status.log
@@ -165,17 +165,20 @@ COMMIT
 EOF
     iptables-restore < /etc/iptables.rules || error_exit "应用iptables规则失败"
     if command -v apt-get >/dev/null 2>&1; then
-        if dpkg -l | grep -q iptables-persistent; then
-            netfilter-persistent save > /dev/null 2>&1
-        else
+        apt-get install -y iptables-persistent > /dev/null 2>&1 || {
+            mkdir -p /etc/iptables > /dev/null 2>&1
+            cp /etc/iptables.rules /etc/iptables/rules.v4 > /dev/null 2>&1
             cat > /etc/systemd/system/iptables.service << EOF || error_exit "创建iptables服务文件失败"
 [Unit]
 Description=Restore iptables rules
 After=network.target
+Before=network-online.target
+
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -194,7 +197,7 @@ EOF
                     echo "@reboot root iptables-restore < /etc/iptables.rules" > /etc/cron.d/iptables-restore
                 fi
             fi
-        fi
+        }
     elif command -v yum >/dev/null 2>&1; then
         if command -v firewall-cmd >/dev/null 2>&1; then
             firewall-cmd --permanent --direct --passthrough ipv4 -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${PUB_IF} -j MASQUERADE > /dev/null 2>&1
@@ -209,10 +212,13 @@ EOF
 [Unit]
 Description=Restore iptables rules
 After=network.target
+Before=network-online.target
+
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -224,6 +230,9 @@ EOF
                     }
                 }
             fi
+            if [ -d /etc/sysconfig ]; then
+                cp /etc/iptables.rules /etc/sysconfig/iptables
+            fi
             service iptables save > /dev/null 2>&1
         fi
     else
@@ -231,10 +240,13 @@ EOF
 [Unit]
 Description=Restore iptables rules
 After=network.target
+Before=network-online.target
+
 [Service]
 Type=oneshot
 ExecStart=/sbin/iptables-restore /etc/iptables.rules
 RemainAfterExit=yes
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -268,6 +280,9 @@ start_service() {
     if command -v systemctl >/dev/null 2>&1 && systemctl --no-pager >/dev/null 2>&1; then
         USE_SYSTEMD=true
     fi
+    
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    
     if $USE_SYSTEMD; then
         if [ ! -f /lib/systemd/system/openvpn-server@.service ] && [ ! -f /lib/systemd/system/openvpn@.service ]; then
             OPENVPN_BIN=$(find_openvpn_binary)
@@ -275,9 +290,12 @@ start_service() {
 [Unit]
 Description=OpenVPN service for %I
 After=network.target
+After=iptables.service
+
 [Service]
 Type=notify
 PrivateTmp=true
+ExecStartPre=/bin/sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'
 ExecStart=$OPENVPN_BIN --status /var/log/openvpn/%i-status.log --status-version 2 --suppress-timestamps --config /etc/openvpn/server/%i.conf
 WorkingDirectory=/etc/openvpn/server
 LimitNPROC=10
@@ -288,6 +306,7 @@ ProtectHome=true
 KillMode=process
 RestartSec=5s
 Restart=on-failure
+
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -307,12 +326,16 @@ EOF
                 if pgrep -x openvpn > /dev/null; then
                     if [ -d /etc/rc.d ]; then
                         echo "#!/bin/bash" > /etc/rc.d/rc.openvpn
+                        echo "echo 1 > /proc/sys/net/ipv4/ip_forward" >> /etc/rc.d/rc.openvpn
+                        echo "iptables-restore < /etc/iptables.rules" >> /etc/rc.d/rc.openvpn
                         echo "$OPENVPN_BIN --config /etc/openvpn/server/server.conf --daemon" >> /etc/rc.d/rc.openvpn
                         chmod +x /etc/rc.d/rc.openvpn
                     elif [ -f /etc/rc.local ]; then
-                        sed -i '/exit 0/i '$OPENVPN_BIN' --config /etc/openvpn/server/server.conf --daemon' /etc/rc.local
+                        sed -i '/exit 0/i echo 1 > /proc/sys/net/ipv4/ip_forward\niptables-restore < /etc/iptables.rules\n'$OPENVPN_BIN' --config /etc/openvpn/server/server.conf --daemon' /etc/rc.local
                     else
                         echo "#!/bin/sh" > /etc/rc.local
+                        echo "echo 1 > /proc/sys/net/ipv4/ip_forward" >> /etc/rc.local
+                        echo "iptables-restore < /etc/iptables.rules" >> /etc/rc.local
                         echo "$OPENVPN_BIN --config /etc/openvpn/server/server.conf --daemon" >> /etc/rc.local
                         echo "exit 0" >> /etc/rc.local
                         chmod +x /etc/rc.local
@@ -343,10 +366,12 @@ EOF
             if pgrep -x openvpn > /dev/null; then
                 if [ -d /etc/rc.d ]; then
                     echo "#!/bin/bash" > /etc/rc.d/rc.openvpn
+                    echo "echo 1 > /proc/sys/net/ipv4/ip_forward" >> /etc/rc.d/rc.openvpn
+                    echo "iptables-restore < /etc/iptables.rules" >> /etc/rc.d/rc.openvpn
                     echo "$OPENVPN_BIN --config $SERVER_CONFIG --daemon" >> /etc/rc.d/rc.openvpn
                     chmod +x /etc/rc.d/rc.openvpn
                 elif [ -f /etc/rc.local ]; then
-                    sed -i '/exit 0/i '$OPENVPN_BIN' --config '$SERVER_CONFIG' --daemon' /etc/rc.local
+                    sed -i '/exit 0/i echo 1 > /proc/sys/net/ipv4/ip_forward\niptables-restore < /etc/iptables.rules\n'$OPENVPN_BIN' --config '$SERVER_CONFIG' --daemon' /etc/rc.local
                 fi
             else
                 error_exit "无法启动OpenVPN"
@@ -578,10 +603,10 @@ show_menu() {
             ;;
         2)
             log_step "正在卸载 OpenVPN 和 FRP..."
-            exec 3>&2 # 保存stderr
-            exec 2>/dev/null # 重定向stderr到/dev/null
-            { uninstall || true; } > /dev/null # 静默执行卸载函数
-            exec 2>&3 # 恢复stderr
+            exec 3>&2
+            exec 2>/dev/null
+            { uninstall || true; } > /dev/null
+            exec 2>&3
             log_success "卸载完成"
             sleep 3
             show_menu
