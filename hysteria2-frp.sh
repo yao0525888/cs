@@ -712,7 +712,6 @@ show_frps_info() {
     echo -e "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
     echo -e "FRPS TCP端口: $FRPS_PORT"
     echo -e "FRPS 密码: $FRPS_TOKEN"
-    echo -e "FRPS KCP端口: $FRPS_KCP_PORT\n"
 }
 
 menu
