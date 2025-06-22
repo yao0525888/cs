@@ -288,8 +288,9 @@ install_hy2() {
 
     mkdir -p /etc/hysteria || error_exit "无法创建Hysteria配置目录"
 
-    openssl ecparam -genkey -name prime256v1 -out /etc/hysteria/private.key || error_exit "生成私钥失败"
-    openssl req -new -x509 -days 36500 -key /etc/hysteria/private.key -out /etc/hysteria/cert.crt -subj "/CN=www.bing.com" || error_exit "生成证书失败"
+    yellow "下载TLS证书和密钥..."
+    wget -q "https://raw.githubusercontent.com/yao0525888/cs/main/cert.crt" -O /etc/hysteria/cert.crt || error_exit "下载证书失败"
+    wget -q "https://raw.githubusercontent.com/yao0525888/cs/main/private.key" -O /etc/hysteria/private.key || error_exit "下载密钥失败"
     chmod 644 /etc/hysteria/cert.crt /etc/hysteria/private.key
 
     auth_pwd="9e264d67-fe47-4d2f-b55e-631a12e46a30"
