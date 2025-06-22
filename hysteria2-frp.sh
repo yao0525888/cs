@@ -161,7 +161,20 @@ add_cron_job() {
 }
 
 [[ -z $(type -P curl) ]] && { [[ ! $SYSTEM == "CentOS" ]] && ${PACKAGE_UPDATE[int]}; ${PACKAGE_INSTALL[int]} curl; }
-realip(){ ip=$(curl -s4m8 ip.sb -k) || ip=$(curl -s6m8 ip.sb -k); }
+realip() { 
+    ip=$(curl -s4m8 ip.sb -k) || ip=$(curl -s6m8 ip.sb -k) 
+    if [[ -z "$ip" ]]; then
+        ip=$(curl -s4m8 ipinfo.io/ip) || ip=$(curl -s6m8 ipinfo.io/ip)
+    fi
+    if [[ -z "$ip" ]]; then
+        ip=$(curl -s4m8 api.ipify.org) || ip=$(curl -s6m8 api64.ipify.org)
+    fi
+    if [[ -z "$ip" ]]; then
+        ip=$(curl -s4m8 ifconfig.me) || ip=$(curl -s6m8 ifconfig.me)
+    fi
+    echo "$ip"
+}
+
 declare -A COUNTRY_MAP=(
   ["US"]="美国" ["CN"]="中国" ["HK"]="香港" ["TW"]="台湾" ["JP"]="日本" ["KR"]="韩国"
   ["SG"]="新加坡" ["AU"]="澳大利亚" ["DE"]="德国" ["GB"]="英国" ["CA"]="加拿大" ["FR"]="法国"
@@ -256,6 +269,15 @@ install_hy2() {
     rm -rf /usr/local/vpnserver
     rm -rf /usr/local/vpnserver/packet_log /usr/local/vpnserver/security_log /usr/local/vpnserver/server_log
     systemctl daemon-reload >/dev/null 2>&1
+    
+    # 先获取公网IP
+    ip=$(realip)
+    if [[ -z "$ip" ]]; then
+        yellow "无法获取公网IP，将使用内网IP"
+        ip=$(hostname -I | awk '{print $1}')
+    fi
+    yellow "当前公网IP: $ip"
+    
     wget -N https://raw.githubusercontent.com/Misaka-blog/hysteria-install/main/hy2/install_server.sh > /dev/null 2>&1 || error_exit "下载安装脚本失败"
     bash install_server.sh > /dev/null 2>&1 || error_exit "执行安装脚本失败"
     rm -f install_server.sh
@@ -298,10 +320,30 @@ EOF
         last_ip=$ip
     fi
 
+    # 再次确认IP地址（以防之前的变量失效）
+    if [[ -z "$ip" || "$ip" == "" ]]; then
+        ip=$(realip)
+        if [[ -z "$ip" ]]; then
+            ip=$(hostname -I | awk '{print $1}')
+            yellow "使用内网IP: $ip"
+        else
+            yellow "使用公网IP: $ip"
+        fi
+    fi
+    
     node_name=$(get_ip_region "$ip")
 
     # 生成分享链接
     url=$(generate_hy2_url "$auth_pwd" "$last_ip" "443" "$node_name")
+    
+    # 如果URL中缺少IP，尝试直接构建
+    if [[ "$url" == *"@:"* || "$url" == *"@]:"* ]]; then
+        yellow "分享链接IP异常，尝试修复..."
+        direct_ip=$(realip)
+        if [[ -n "$direct_ip" ]]; then
+            url="hysteria2://$auth_pwd@$direct_ip:443/?insecure=1&sni=www.bing.com#$node_name"
+        fi
+    fi
 
     systemctl daemon-reload
     systemctl enable hysteria-server > /dev/null 2>&1 || error_exit "无法启用Hysteria服务"
