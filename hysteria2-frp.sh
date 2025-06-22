@@ -411,7 +411,7 @@ install_hy2() {
     auth_pwd="9e264d67-fe47-4d2f-b55e-631a12e46a30"
 
     cat << EOF > /etc/hysteria/config.yaml || error_exit "无法创建Hysteria配置文件"
-listen: :443
+listen: :7005
 
 tls:
   cert: /etc/hysteria/cert.crt
