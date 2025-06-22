@@ -46,7 +46,6 @@ FRPS_TOKEN=$(gen_frps_token)
 
 # 卸载旧版FRPS
 uninstall_frps() {
-    yellow "卸载旧版FRPS服务..."
     systemctl stop frps >/dev/null 2>&1
     systemctl disable frps >/dev/null 2>&1
     rm -f /etc/systemd/system/frps.service
