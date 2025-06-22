@@ -35,7 +35,6 @@ TRANSPORT_CONFIG="
 # FRPS配置
 FRP_VERSION="v0.62.1"
 FRPS_PORT="8443"
-FRPS_KCP_PORT="8443"
 FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 
@@ -87,7 +86,6 @@ install_frps() {
     cat > /etc/frp/frps.toml << EOF
 bindAddr = "127.0.0.1"
 bindPort = ${FRPS_PORT}
-kcpBindPort = ${FRPS_KCP_PORT}
 auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
 EOF
@@ -112,15 +110,7 @@ EOF
     if [ $? -ne 0 ]; then
         error_exit "写入 frps.service 文件失败"
     fi
-    yellow "配置防火墙规则..."
-         if command -v ufw >/dev/null 2>&1; then
-        ufw allow ${FRPS_PORT}/tcp >/dev/null 2>&1
-        echo "已添加 UFW 防火墙规则"
-    elif command -v firewall-cmd >/dev/null 2>&1; then
-        firewall-cmd --permanent --add-port=${FRPS_PORT}/tcp >/dev/null 2>&1
-        firewall-cmd --reload >/dev/null 2>&1
-        echo "已添加 firewalld 防火墙规则"
-    fi
+
     
     systemctl daemon-reload
     if [ $? -ne 0 ]; then
