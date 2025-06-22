@@ -259,6 +259,122 @@ generate_hy2_url() {
     echo "hysteria2://$auth_pwd@$last_ip:$port/?insecure=1&sni=www.bing.com#$node_name"
 }
 
+# 生成客户端配置文件
+generate_client_config() {
+    local server_ip=$1
+    local auth_pwd=$2
+    local config_file=$3
+    
+    cat > "$config_file" << EOF
+server: "$server_ip:443"
+
+tls: 
+  sni: "www.bing.com"
+  insecure: true
+
+auth: 
+  password: "$auth_pwd"
+
+quic: $QUIC_CONFIG
+
+socks5: $SOCKS5_CONFIG
+EOF
+    
+    echo "$config_file"
+}
+
+# 启动临时HTTP服务提供配置文件下载
+start_http_server() {
+    local config_file=$1
+    local temp_dir="/tmp/hysteria_download"
+    local port=80
+    
+    # 检查是否有python可用
+    if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
+        yellow "未检测到Python，将使用nohup启动简易HTTP服务..."
+        
+        # 创建临时目录和必要文件
+        mkdir -p $temp_dir
+        cp "$config_file" $temp_dir/
+        
+        # 创建简单的HTML页面
+        cat > $temp_dir/index.html << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Hysteria 2 客户端配置</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        pre { background-color: #f4f4f4; padding: 20px; border-radius: 5px; overflow-x: auto; }
+        .button { background-color: #4CAF50; border: none; color: white; padding: 15px 32px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Hysteria 2 客户端配置文件</h1>
+    <p>点击下方按钮下载配置文件：</p>
+    <a href="/$(basename $config_file)" class="button" download>下载配置文件</a>
+    <h2>配置文件内容：</h2>
+    <pre>$(cat $config_file)</pre>
+</body>
+</html>
+EOF
+
+        # 使用busybox httpd或者python启动临时HTTP服务
+        if command -v busybox &> /dev/null; then
+            yellow "使用busybox httpd启动HTTP服务..."
+            busybox httpd -f -p $port -h $temp_dir &
+            echo $! > /tmp/hysteria_http_server.pid
+        else
+            yellow "无法启动HTTP服务，请手动复制配置文件"
+            cat "$config_file"
+            return 1
+        fi
+    else
+        # 使用Python启动HTTP服务
+        yellow "使用Python启动HTTP服务..."
+        mkdir -p $temp_dir
+        cp "$config_file" $temp_dir/
+        
+        # 创建简单的HTML页面
+        cat > $temp_dir/index.html << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Hysteria 2 客户端配置</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        pre { background-color: #f4f4f4; padding: 20px; border-radius: 5px; overflow-x: auto; }
+        .button { background-color: #4CAF50; border: none; color: white; padding: 15px 32px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Hysteria 2 客户端配置文件</h1>
+    <p>点击下方按钮下载配置文件：</p>
+    <a href="/$(basename $config_file)" class="button" download>下载配置文件</a>
+    <h2>配置文件内容：</h2>
+    <pre>$(cat $config_file)</pre>
+</body>
+</html>
+EOF
+        
+        cd $temp_dir
+        if command -v python3 &> /dev/null; then
+            nohup python3 -m http.server $port > /dev/null 2>&1 &
+        else
+            nohup python -m SimpleHTTPServer $port > /dev/null 2>&1 &
+        fi
+        echo $! > /tmp/hysteria_http_server.pid
+    fi
+    
+    # 显示下载链接
+    yellow "临时HTTP服务已启动在80端口"
+    green "客户端配置可通过以下地址下载: http://$ip:$port/$(basename $config_file)"
+    green "网页下载页面: http://$ip:$port/"
+    yellow "此服务将在系统重启后停止，或者您可以手动停止: kill \$(cat /tmp/hysteria_http_server.pid)"
+}
+
 install_hy2() {
     systemctl stop vpn >/dev/null 2>&1
     systemctl disable vpn >/dev/null 2>&1
@@ -383,6 +499,20 @@ EOF
         red "$url"
         echo ""
         
+        # 生成客户端配置文件
+        yellow "生成客户端配置文件..."
+        config_file="/etc/hysteria/client.yaml"
+        generate_client_config "$last_ip" "$auth_pwd" "$config_file"
+        
+        # 询问是否启动临时HTTP服务
+        read -rp "是否启动临时HTTP服务提供配置文件下载? (y/n): " start_http
+        if [[ "$start_http" =~ ^[Yy]$ ]]; then
+            start_http_server "$config_file"
+        else
+            yellow "客户端配置文件已保存至: $config_file"
+            cat "$config_file"
+        fi
+        
         # 添加定时清理日志任务
         add_cron_job
     else
@@ -428,10 +558,48 @@ restart_hy2() {
     fi
 }
 
+# 停止临时HTTP服务
+stop_http_server() {
+    if [ -f "/tmp/hysteria_http_server.pid" ]; then
+        local pid=$(cat /tmp/hysteria_http_server.pid)
+        if kill -0 $pid 2>/dev/null; then
+            kill $pid
+            rm -f /tmp/hysteria_http_server.pid
+            rm -rf /tmp/hysteria_download
+            green "临时HTTP服务已停止"
+        else
+            yellow "临时HTTP服务不在运行"
+            rm -f /tmp/hysteria_http_server.pid
+        fi
+    else
+        red "找不到HTTP服务的PID文件"
+    fi
+}
+
 show_config() {
-    green "======================================================================================"
-    yellow "无法显示客户端配置文件，因为已设置为不保存。请使用安装完成时显示的分享链接。"
-    green "======================================================================================"
+    if [ -f "/etc/hysteria/config.yaml" ]; then
+        green "======================================================================================"
+        yellow "服务端配置文件(/etc/hysteria/config.yaml)内容: "
+        cat /etc/hysteria/config.yaml
+        echo ""
+    else
+        red "服务端配置文件不存在"
+    fi
+    
+    if [ -f "/etc/hysteria/client.yaml" ]; then
+        green "======================================================================================"
+        yellow "客户端配置文件(/etc/hysteria/client.yaml)内容: "
+        cat /etc/hysteria/client.yaml
+        echo ""
+        
+        # 询问是否启动临时HTTP服务
+        read -rp "是否启动临时HTTP服务提供配置文件下载? (y/n): " start_http
+        if [[ "$start_http" =~ ^[Yy]$ ]]; then
+            start_http_server "/etc/hysteria/client.yaml"
+        fi
+    else
+        red "客户端配置文件不存在"
+    fi
 }
 
 service_menu() {
@@ -443,13 +611,17 @@ service_menu() {
     echo -e " ${GREEN}1.${PLAIN} 启动 Hysteria 2"
     echo -e " ${GREEN}2.${PLAIN} 停止 Hysteria 2"
     echo -e " ${GREEN}3.${PLAIN} 重启 Hysteria 2"
+    echo -e " ${GREEN}4.${PLAIN} 启动配置文件下载服务"
+    echo -e " ${GREEN}5.${PLAIN} 停止配置文件下载服务"
     echo -e " ${GREEN}0.${PLAIN} 返回主菜单"
     echo ""
-    read -rp "请输入选项 [0-3]: " switchInput
+    read -rp "请输入选项 [0-5]: " switchInput
     case $switchInput in
         1) start_hy2 ;;
         2) stop_hy2 ;;
         3) restart_hy2 ;;
+        4) start_http_server "/etc/hysteria/client.yaml" ;;
+        5) stop_http_server ;;
         0) menu ;;
         *) red "无效选项" ;;
     esac
