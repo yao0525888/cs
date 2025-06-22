@@ -84,7 +84,7 @@ install_frps() {
     yellow "创建FRPS配置文件..."
     mkdir -p /etc/frp || error_exit "创建 /etc/frp 目录失败"
     cat > /etc/frp/frps.toml << EOF
-bindAddr = "127.0.0.1"
+bindAddr = "0.0.0.0"
 bindPort = ${FRPS_PORT}
 auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
