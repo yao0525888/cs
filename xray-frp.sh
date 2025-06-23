@@ -112,8 +112,9 @@ install_frps() {
     fi
     log_info "创建FRPS配置文件..."
     mkdir -p /etc/frp || log_error "创建 /etc/frp 目录失败"
+    PUBLIC_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
     cat > /etc/frp/frps.toml << EOF
-bindAddr = "0.0.0.0"
+bindAddr = "${PUBLIC_IP}"
 bindPort = ${FRPS_PORT}
 auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
@@ -302,7 +303,9 @@ show_frps_info() {
     echo -e "\n${YELLOW}>>> FRPS服务状态：${NC}"
     systemctl is-active frps
     echo -e "\n${YELLOW}>>> FRPS信息：${NC}"
-    echo -e "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+    PUBLIC_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
+    echo -e "服务器地址: $PUBLIC_IP"
+    echo -e "FRPS 绑定地址: $PUBLIC_IP"
     echo -e "FRPS 密码: $FRPS_TOKEN"
     echo -e "TCP端口: $FRPS_PORT"
 }
@@ -314,7 +317,9 @@ show_results() {
     echo -e "\n${YELLOW}>>> Xray服务状态：${NC}"
     systemctl is-active xray
     echo -e "\n${YELLOW}>>> FRPS信息：${NC}"
-    echo -e "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+    PUBLIC_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
+    echo -e "服务器地址: $PUBLIC_IP"
+    echo -e "FRPS 绑定地址: $PUBLIC_IP"
     echo -e "FRPS 密码: $FRPS_TOKEN"
     echo -e "TCP端口: $FRPS_PORT"
 
