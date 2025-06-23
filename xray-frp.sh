@@ -24,16 +24,14 @@ declare -A COUNTRY_MAP=(
 )
 
 # FRPS配置
-FRP_VERSION="v0.44.0"
-FRPS_PORT="7000"
-FRPS_UDP_PORT="7001"
-FRPS_KCP_PORT="7002"
+FRP_VERSION="v0.62.1"
+FRPS_PORT="7006"
+FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 
 # 获取FRPS连接密码的函数
 gen_frps_token() {
-    # 这里可以自定义生成逻辑，比如随机、读取文件、环境变量等
-    echo "DFRN2vbG123"
+    echo "$FRPS_TOKEN"
 }
 FRPS_TOKEN=$(gen_frps_token)
 
@@ -90,50 +88,86 @@ install_frps() {
     local FRP_FILE="${FRP_NAME}.tar.gz"
     cd /usr/local/ || exit 1
     log_info "下载FRPS（版本：${FRP_VERSION}）..."
-    if ! wget "https://github.com/fatedier/frp/releases/download/${FRP_VERSION}/${FRP_FILE}" -O "${FRP_FILE}" >/dev/null 2>&1; then
-        exit 1
+    if ! wget -q "https://github.com/fatedier/frp/releases/download/${FRP_VERSION}/${FRP_FILE}" -O "${FRP_FILE}" >/dev/null 2>&1; then
+        log_error "FRPS下载失败"
     fi
+    log_info "解压FRPS安装包..."
     if ! tar -zxf "${FRP_FILE}" >/dev/null 2>&1; then
         rm -f "${FRP_FILE}"
-        exit 1
+        log_error "FRPS解压失败"
     fi
-    cd "${FRP_NAME}" || exit 1
-    mkdir -p /usr/local/frp || exit 1
-    if ! cp frps /usr/local/frp/ >/dev/null 2>&1; then
-        exit 1
+    cd "${FRP_NAME}" || log_error "无法进入解压目录"
+    rm -f frpc*
+    log_info "安装FRPS可执行文件..."
+    mkdir -p /usr/local/frp || log_error "创建 /usr/local/frp 目录失败"
+    if ! cp frps /usr/local/frp/; then
+        log_error "拷贝 frps 可执行文件失败"
     fi
     chmod +x /usr/local/frp/frps
-    mkdir -p /etc/frp || exit 1
-    {
-        echo "[common]"
-        echo "bind_addr = 0.0.0.0"
-        echo "bind_port = ${FRPS_PORT}"
-        echo "bind_udp_port = ${FRPS_UDP_PORT}"
-        echo "kcp_bind_port = ${FRPS_KCP_PORT}"
-        echo "token = $FRPS_TOKEN"
-        echo "log_level = silent"
-        echo "disable_log_color = true"
-    } > /etc/frp/frps.toml || exit 1
-    {
-        echo "[Unit]"
-        echo "Description=FRP Server"
-        echo "After=network.target"
-        echo "[Service]"
-        echo "Type=simple"
-        echo "ExecStart=/usr/local/frp/frps -c /etc/frp/frps.toml"
-        echo "Restart=on-failure"
-        echo "LimitNOFILE=1048576"
-        echo "[Install]"
-        echo "WantedBy=multi-user.target"
-    } > /etc/systemd/system/frps.service || exit 1
-    if ! systemctl daemon-reload >/dev/null 2>&1; then
-        exit 1
+    if [ $? -ne 0 ]; then
+        log_error "设置 frps 可执行权限失败"
     fi
-    if ! systemctl enable --now frps >/dev/null 2>&1; then
-        systemctl status frps
-        exit 1
+    log_info "创建FRPS配置文件..."
+    mkdir -p /etc/frp || log_error "创建 /etc/frp 目录失败"
+    cat > /etc/frp/frps.toml << EOF
+bindAddr = "0.0.0.0"
+bindPort = ${FRPS_PORT}
+auth.method = "token"
+auth.token = "${FRPS_TOKEN}"
+EOF
+    if [ $? -ne 0 ]; then
+        log_error "写入 frps.toml 配置文件失败"
     fi
+    log_info "创建FRPS服务单元..."
+    cat > /etc/systemd/system/frps.service << EOF
+[Unit]
+Description=Frp Server Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/frp/frps -c /etc/frp/frps.toml
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    if [ $? -ne 0 ]; then
+        log_error "写入 frps.service 文件失败"
+    fi
+
+    
+    systemctl daemon-reload
+    if [ $? -ne 0 ]; then
+        log_error "重新加载 systemd 配置失败"
+    fi
+    systemctl enable frps >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        log_error "启用 frps 服务失败"
+    fi
+    log_info "启用并启动FRPS服务..."
+    systemctl start frps >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        log_error "启动 frps 服务失败"
+    fi
+    
+    if systemctl is-active frps >/dev/null 2>&1; then
+        log_success "FRPS服务已成功启动"
+    else
+        log_error "FRPS服务启动失败"
+    fi
+    
+    rm -f /usr/local/${FRP_FILE}
+    rm -rf /usr/local/${FRP_NAME}
+    
     log_success "FRPS安装成功"
+    
+    # 清理临时文件
+    cleanup
+    
+    # 添加定时清理日志任务
+    add_cron_job
 }
 
 # 安装Xray
@@ -261,6 +295,16 @@ cleanup() {
     rm -rf /usr/local/frp_* /usr/local/frp_*_linux_amd64
 }
 
+# 显示FRPS信息
+show_frps_info() {
+    echo -e "\n${YELLOW}>>> FRPS服务状态：${NC}"
+    systemctl is-active frps
+    echo -e "\n${YELLOW}>>> FRPS信息：${NC}"
+    echo -e "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
+    echo -e "FRPS 密码: $FRPS_TOKEN"
+    echo -e "TCP端口: $FRPS_PORT"
+}
+
 # 显示结果
 show_results() {
     echo -e "\n${YELLOW}>>> FRPS服务状态：${NC}"
@@ -271,8 +315,6 @@ show_results() {
     echo -e "服务器地址: $(curl -s ifconfig.me || hostname -I | awk '{print $1}')"
     echo -e "FRPS 密码: $FRPS_TOKEN"
     echo -e "TCP端口: $FRPS_PORT"
-    echo -e "UDP端口: $FRPS_UDP_PORT"
-    echo -e "KCP端口: $FRPS_KCP_PORT"
 
     echo -e "\n${YELLOW}>>> Xray Reality 分享链接：${NC}"
     LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION"
@@ -405,7 +447,8 @@ show_menu() {
     echo -e "${GREEN}3.${NC} 修改Xray端口"
     echo -e "${GREEN}4.${NC} 修改Xray协议"
     echo -e "${GREEN}5.${NC} 查看Xray分享链接"
-    echo -e "${GREEN}6.${NC} 退出"
+    echo -e "${GREEN}6.${NC} 查看FRPS信息"
+    echo -e "${GREEN}0.${NC} 退出脚本"
     echo -e "${YELLOW}===========================${NC}"
 }
 
@@ -415,7 +458,7 @@ main() {
     
     while true; do
         show_menu
-        read -p "请选择操作 [1-6]: " choice
+        read -p "请选择操作 [0-6]: " choice
         
         case $choice in
             1)
@@ -424,13 +467,11 @@ main() {
                 add_cron_job
                 cleanup
                 show_results
-                break
                 ;;
             2)
                 uninstall_frps
                 uninstall_xray
                 log_success "所有服务已卸载"
-                break
                 ;;
             3)
                 modify_xray_port
@@ -442,6 +483,9 @@ main() {
                 show_xray_link
                 ;;
             6)
+                show_frps_info
+                ;;
+            0)
                 echo -e "${GREEN}退出脚本${NC}"
                 exit 0
                 ;;
@@ -449,6 +493,11 @@ main() {
                 echo -e "${RED}无效的选择，请重试${NC}"
                 ;;
         esac
+        
+        if [ "$choice" != "0" ]; then
+            echo -e "\n${YELLOW}按回车键返回主菜单...${NC}"
+            read -s
+        fi
     done
 }
 
