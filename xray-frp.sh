@@ -173,6 +173,9 @@ EOF
 # 安装Xray
 install_xray() {
     log_step "2" "2" "安装Xray服务..."
+    # 确保在可写的目录中工作
+    cd /usr/local/ || exit 1
+    
     ARCH=$(uname -m)
     case $ARCH in
         x86_64) ARCH="64" ;;
