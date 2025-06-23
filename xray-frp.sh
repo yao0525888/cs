@@ -173,9 +173,6 @@ EOF
 # 安装Xray
 install_xray() {
     log_step "2" "2" "安装Xray服务..."
-    # 确保在可写的目录中工作
-    cd /usr/local/ || exit 1
-    
     ARCH=$(uname -m)
     case $ARCH in
         x86_64) ARCH="64" ;;
@@ -184,18 +181,21 @@ install_xray() {
         *) log_error "不支持的架构" ;;
     esac
 
-    # 推荐优先用 jq
-    if command -v jq >/dev/null 2>&1; then
-        VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
-    else
-        VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -n 1 | cut -d '"' -f 4)
-    fi
-    if [ -z "$VER" ]; then
-        log_error "获取 Xray 版本号失败"
-    fi
-    log_info "Xray 最新版本号: $VER"
+    # 直接使用固定的稳定版本，避免API请求问题
+    VER="v25.6.8"
+    log_info "使用 Xray 版本号: $VER"
     URL="https://github.com/XTLS/Xray-core/releases/download/$VER/Xray-linux-$ARCH.zip"
-    wget -q -O xray.zip $URL
+    log_info "正在下载 Xray: $URL"
+    # 增加重试机制(3次尝试)
+    max_tries=3
+    tries=0
+    while [ $tries -lt $max_tries ]; do
+        wget --timeout=30 --tries=3 -q -O xray.zip $URL && break
+        tries=$((tries+1))
+        log_info "下载尝试 $tries/$max_tries 失败，再次尝试..."
+        sleep 2
+    done
+    
     if [ ! -s xray.zip ]; then
         log_error "Xray 安装包下载失败，文件不存在或为空，URL: $URL"
     fi
