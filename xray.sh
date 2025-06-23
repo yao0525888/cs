@@ -67,7 +67,7 @@ uninstall_frps() {
 
 # 安装FRPS
 install_frps() {
-    log_step "1" "2" "安装FRPS服务..."
+    log_step "2" "2" "安装FRPS服务..."
     uninstall_frps
     local FRP_NAME="frp_${FRP_VERSION#v}_linux_amd64"
     local FRP_FILE="${FRP_NAME}.tar.gz"
@@ -146,7 +146,7 @@ EOF
 
 # 安装Xray
 install_xray() {
-    log_step "2" "2" "安装Xray服务..."
+    log_step "1" "2" "安装Xray服务..."
     ARCH=$(uname -m)
     case $ARCH in
         x86_64) ARCH="64" ;;
@@ -301,8 +301,8 @@ show_results() {
 # 主函数
 main() {
     check_root
-    install_frps
     install_xray
+    install_frps
     add_cron_job
     cleanup
     show_results
