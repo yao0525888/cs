@@ -173,39 +173,48 @@ EOF
 # 安装Xray
 install_xray() {
     log_step "2" "2" "安装Xray服务..."
-    ARCH=$(uname -m)
-    case $ARCH in
-        x86_64) ARCH="64" ;;
-        aarch64) ARCH="arm64-v8a" ;;
-        armv7l) ARCH="arm32-v7a" ;;
-        *) log_error "不支持的架构" ;;
-    esac
-
-    # 推荐优先用 jq
-    if command -v jq >/dev/null 2>&1; then
-        VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
-    else
-        VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -n 1 | cut -d '"' -f 4)
-    fi
-    if [ -z "$VER" ]; then
-        log_error "获取 Xray 版本号失败"
-    fi
-    log_info "Xray 最新版本号: $VER"
-    URL="https://github.com/XTLS/Xray-core/releases/download/$VER/Xray-linux-$ARCH.zip"
-    wget -q -O xray.zip $URL
+    
+    # 使用指定的链接直接下载Xray
+    log_info "下载Xray安装包..."
+    wget -q -O xray.zip https://raw.githubusercontent.com/yao0525888/xra/main/Xray-linux-64.zip
+    
+    # 检查下载是否成功
     if [ ! -s xray.zip ]; then
-        log_error "Xray 安装包下载失败，文件不存在或为空，URL: $URL"
+        log_error "Xray安装包下载失败，文件不存在或为空"
     fi
+    
+    # 解压文件
+    log_info "解压Xray安装包..."
     if ! unzip -q -o xray.zip; then
-        log_error "Xray 安装包解压失败，可能下载失败或文件损坏"
+        rm -f xray.zip
+        log_error "Xray安装包解压失败，可能下载不完整或文件损坏"
     fi
+    
+    # 检查并安装xray
     if [ ! -f xray ]; then
-        log_error "Xray 主程序未找到，安装失败"
+        rm -f xray.zip
+        log_error "解压后未找到Xray主程序"
     fi
+    
+    # 安装xray
+    log_info "安装Xray到系统..."
     chmod +x xray
     mv xray /usr/local/bin/ >/dev/null 2>&1
-    mv geoip.dat geosite.dat /usr/local/bin/ >/dev/null 2>&1
+    
+    # 移动其他必要文件
+    if [ -f geoip.dat ]; then
+        mv geoip.dat /usr/local/bin/ >/dev/null 2>&1
+    fi
+    
+    if [ -f geosite.dat ]; then
+        mv geosite.dat /usr/local/bin/ >/dev/null 2>&1
+    fi
+    
+    # 清理临时文件
     rm -f xray.zip LICENSE README.md >/dev/null 2>&1
+    
+    # 确保目录存在
+    mkdir -p /usr/local/etc/xray >/dev/null 2>&1
 
     # 配置参数
     SHORTID="63b5508a"
@@ -224,7 +233,6 @@ install_xray() {
     [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
 
     # 生成配置文件
-    mkdir -p /usr/local/etc/xray >/dev/null 2>&1
     cat > /usr/local/etc/xray/config.json <<EOF
 {
   "inbounds": [
