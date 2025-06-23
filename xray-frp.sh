@@ -176,12 +176,7 @@ install_xray() {
     
     # 使用指定的链接直接下载Xray
     log_info "下载Xray安装包..."
-    wget -q -O xray.zip https://github.com/user-attachments/files/20855902/Xray-linux-64.zip
-    
-    # 检查下载是否成功
-    if [ ! -s xray.zip ]; then
-        log_error "Xray安装包下载失败，文件不存在或为空"
-    fi
+    wget -q -O https://github.com/user-attachments/files/20855902/Xray-linux-64.zip
     
     # 解压文件
     log_info "解压Xray安装包..."
