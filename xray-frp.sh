@@ -29,6 +29,16 @@ FRPS_PORT="7006"
 FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 
+# Xray配置参数（全局只声明一次）
+UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
+PRIVATE_KEY="mNWQz072OPzfDWlGjA4UILz9gHTtTOG9bbxyJX67b2Y"
+PUBLIC_KEY="NBKTazDEILwl4YB7m-RU2WDUOwzzv6eO67Eg3_F4ml8"
+PORT=443
+FLOW="xtls-rprx-vision"
+SNI="www.bing.com"
+SHORTID="abcdef12"
+NET="tcp"
+
 # 日志函数
 log_info() {
     if [[ "$SILENT_MODE" == "true" ]]; then
@@ -202,34 +212,34 @@ install_xray() {
     cat > /usr/local/etc/xray/config.json <<EOF
 {
   "log": {
-    "loglevel": "warning"
+    "loglevel": "none"
   },
   "inbounds": [
     {
-      "port": 443,
+      "port": $PORT,
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "9e264d67-fe47-4d2f-b55e-631a12e46a30",
-            "flow": "xtls-rprx-vision"
+            "id": "$UUID",
+            "flow": "$FLOW"
           }
         ],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "tcp",
+        "network": "$NET",
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "www.bing.com:443",
+          "dest": "$SNI:$PORT",
           "xver": 0,
           "serverNames": [
-            "www.bing.com"
+            "$SNI"
           ],
-          "privateKey": "mNWQz072OPzfDWlGjA4UILz9gHTtTOG9bbxyJX67b2Y",
+          "privateKey": "$PRIVATE_KEY",
           "shortIds": [
-            "abcdef12"
+            "$SHORTID"
           ]
         }
       }
@@ -308,22 +318,13 @@ show_results() {
     echo -e "TCP端口: $FRPS_PORT"
 
     echo -e "\n${YELLOW}>>> Xray Reality 分享链接：${NC}"
-    # 使用固定参数
-    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
-    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
-    PORT=443
-    FLOW="xtls-rprx-vision"
-    SNI="www.bing.com"
-    SHORTID="abcdef12"
-    ALPN="h2"
-    DOMAIN=$(curl -s ifconfig.me)
-    
     # 获取地区信息
+    DOMAIN=$(curl -s ifconfig.me)
     COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
     REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
     [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
     
-    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION"
+    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET#$REGION"
     echo -e "${GREEN}$LINK${NC}\n"
 }
 
@@ -363,21 +364,13 @@ modify_xray_port() {
     # 重启服务
     systemctl restart xray
     
-    # 更新分享链接
-    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
-    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
-    FLOW="xtls-rprx-vision"
-    SNI="www.bing.com"
-    SHORTID="abcdef12"
-    ALPN="h2"
-    DOMAIN=$(curl -s ifconfig.me)
-    
     # 获取地区信息
+    DOMAIN=$(curl -s ifconfig.me)
     COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
     REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
     [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
     
-    LINK="vless://$UUID@$DOMAIN:$NEW_PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION"
+    LINK="vless://$UUID@$DOMAIN:$NEW_PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET#$REGION"
     
     log_success "Xray端口已修改为: $NEW_PORT"
     echo -e "\n${YELLOW}>>> 新的Xray Reality分享链接：${NC}"
@@ -386,23 +379,13 @@ modify_xray_port() {
 
 # 查看当前分享链接
 show_xray_link() {
-    # 使用固定参数
-    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
-    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
-    PORT=443
-    FLOW="xtls-rprx-vision"
-    SNI="www.bing.com"
-    SHORTID="abcdef12"
-    ALPN="h2"
-    NET="tcp"
-    DOMAIN=$(curl -s ifconfig.me)
-    
     # 获取地区信息
+    DOMAIN=$(curl -s ifconfig.me)
     COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
     REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
     [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
     
-    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET&alpn=$ALPN#$REGION"
+    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET#$REGION"
     echo -e "\n${YELLOW}>>> 当前Xray Reality分享链接：${NC}"
     echo -e "${GREEN}$LINK${NC}\n"
 }
