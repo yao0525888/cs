@@ -24,7 +24,8 @@ declare -A COUNTRY_MAP=(
 
 
 FRP_VERSION="v0.62.1"
-FRPS_PORT="7006"
+FRPS_PORT="7006"  # 客户端连接的端口，由xray监听
+FRPS_INTERNAL_PORT="7007"  # frps实际监听的内部端口
 FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 
@@ -113,8 +114,8 @@ install_frps() {
     log_info "创建FRPS配置文件..."
     mkdir -p /etc/frp || log_error "创建 /etc/frp 目录失败"
     cat > /etc/frp/frps.toml << EOF
-bindAddr = "0.0.0.0"
-bindPort = ${FRPS_PORT}
+bindAddr = "127.0.0.1"
+bindPort = ${FRPS_INTERNAL_PORT}
 auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
 EOF
@@ -249,7 +250,7 @@ install_xray() {
       "protocol": "dokodemo-door",
       "settings": {
         "address": "127.0.0.1",
-        "port": ${FRPS_PORT},
+        "port": ${FRPS_INTERNAL_PORT},
         "network": "tcp"
       }
     }
