@@ -181,21 +181,18 @@ install_xray() {
         *) log_error "不支持的架构" ;;
     esac
 
-    # 直接使用固定的稳定版本，避免API请求问题
-    VER="v25.6.8"
-    log_info "使用 Xray 版本号: $VER"
+    # 推荐优先用 jq
+    if command -v jq >/dev/null 2>&1; then
+        VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name)
+    else
+        VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name"' | head -n 1 | cut -d '"' -f 4)
+    fi
+    if [ -z "$VER" ]; then
+        log_error "获取 Xray 版本号失败"
+    fi
+    log_info "Xray 最新版本号: $VER"
     URL="https://github.com/XTLS/Xray-core/releases/download/$VER/Xray-linux-$ARCH.zip"
-    log_info "正在下载 Xray: $URL"
-    # 增加重试机制(3次尝试)
-    max_tries=3
-    tries=0
-    while [ $tries -lt $max_tries ]; do
-        wget --timeout=30 --tries=3 -q -O xray.zip $URL && break
-        tries=$((tries+1))
-        log_info "下载尝试 $tries/$max_tries 失败，再次尝试..."
-        sleep 2
-    done
-    
+    wget -q -O xray.zip $URL
     if [ ! -s xray.zip ]; then
         log_error "Xray 安装包下载失败，文件不存在或为空，URL: $URL"
     fi
@@ -338,10 +335,81 @@ uninstall_xray() {
     log_success "Xray卸载成功"
 }
 
-# 显示Xray信息
-show_xray_info() {
-    echo -e "\n${YELLOW}>>> Xray服务状态：${NC}"
-    systemctl is-active xray
+# 修改Xray端口
+modify_xray_port() {
+    log_step "1" "1" "修改Xray端口..."
+    read -p "请输入新的端口号(1-65535): " NEW_PORT
+    
+    # 验证端口号
+    if ! [[ "$NEW_PORT" =~ ^[0-9]+$ ]] || [ "$NEW_PORT" -lt 1 ] || [ "$NEW_PORT" -gt 65535 ]; then
+        log_error "无效的端口号，请输入1-65535之间的数字"
+    fi
+    
+    # 检查端口是否被占用
+    if netstat -tuln | grep -q ":$NEW_PORT "; then
+        log_error "端口 $NEW_PORT 已被占用"
+    fi
+    
+    # 修改配置文件
+    sed -i "s/\"port\": [0-9]*/\"port\": $NEW_PORT/" /usr/local/etc/xray/config.json
+    
+    # 重新读取配置参数，保证链接完整
+    if command -v jq >/dev/null 2>&1; then
+        UUID=$(jq -r '.inbounds[0].settings.clients[0].id' /usr/local/etc/xray/config.json)
+        FLOW=$(jq -r '.inbounds[0].settings.clients[0].flow' /usr/local/etc/xray/config.json)
+        SNI=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' /usr/local/etc/xray/config.json)
+        SHORTID=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0]' /usr/local/etc/xray/config.json)
+        PRIVATE_KEY=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey' /usr/local/etc/xray/config.json)
+    else
+        UUID=$(grep -oP '"id": *"\K[^"]+' /usr/local/etc/xray/config.json)
+        FLOW=$(grep -oP '"flow": *"\K[^"]+' /usr/local/etc/xray/config.json)
+        SNI=$(grep -oP '"serverNames": *\[ *"\K[^"]+' /usr/local/etc/xray/config.json)
+        SHORTID=$(grep -oP '"shortIds": *\[ *"\K[^"]+' /usr/local/etc/xray/config.json)
+        PRIVATE_KEY=$(grep -oP '"privateKey": *"\K[^"]+' /usr/local/etc/xray/config.json)
+    fi
+    # 其它参数
+    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
+    ALPN="h2"
+    REGION="$(curl -s "https://ipinfo.io/$(curl -s ifconfig.me)/country")"
+    [ -z "$REGION" ] && REGION="CN"
+    # 国家代码转中文
+    REGION_CN=${COUNTRY_MAP[$REGION]}
+    [ -z "$REGION_CN" ] && REGION_CN="$REGION"
+    
+    # 重启服务
+    systemctl restart xray
+    
+    # 更新分享链接
+    PORT=$NEW_PORT
+    DOMAIN=$(curl -s ifconfig.me)
+    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION_CN"
+    
+    log_success "Xray端口已修改为: $NEW_PORT"
+    echo -e "\n${YELLOW}>>> 新的Xray Reality分享链接：${NC}"
+    echo -e "${GREEN}$LINK${NC}\n"
+}
+
+# 修改Xray协议
+modify_xray_protocol() {
+    log_step "1" "1" "修改Xray协议..."
+    echo "请选择协议类型："
+    echo "1. tcp"
+    echo "2. ws"
+    echo "3. grpc"
+    read -p "输入序号 [1-3]: " proto_choice
+    case $proto_choice in
+        1) NEW_PROTO="tcp" ;;
+        2) NEW_PROTO="ws" ;;
+        3) NEW_PROTO="grpc" ;;
+        *) log_error "无效选择" ;;
+    esac
+    sed -i "s/\"network\": \"[a-z0-9-]*\"/\"network\": \"$NEW_PROTO\"/" /usr/local/etc/xray/config.json
+    systemctl restart xray
+    log_success "Xray协议已修改为: $NEW_PROTO"
+}
+
+# 查看当前分享链接
+show_xray_link() {
     # 读取参数
     if command -v jq >/dev/null 2>&1; then
         UUID=$(jq -r '.inbounds[0].settings.clients[0].id' /usr/local/etc/xray/config.json)
@@ -367,7 +435,7 @@ show_xray_info() {
     REGION_CN=${COUNTRY_MAP[$REGION]}
     [ -z "$REGION_CN" ] && REGION_CN="$REGION"
     LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET&alpn=$ALPN#$REGION_CN"
-    echo -e "\n${YELLOW}>>> Xray Reality 分享链接：${NC}"
+    echo -e "\n${YELLOW}>>> 当前Xray Reality分享链接：${NC}"
     echo -e "${GREEN}$LINK${NC}\n"
 }
 
@@ -375,13 +443,12 @@ show_xray_info() {
 show_menu() {
     echo -e "${YELLOW}=== Xray & FRPS 管理脚本 ===${NC}"
     echo -e "${GREEN}1.${NC} 安装 Xray + FRPS"
-    echo -e "${GREEN}2.${NC} 仅安装 Xray"
-    echo -e "${GREEN}3.${NC} 仅安装 FRPS"
-    echo -e "${GREEN}4.${NC} 卸载 Xray"
-    echo -e "${GREEN}5.${NC} 卸载 FRPS"
-    echo -e "${GREEN}6.${NC} 卸载 Xray + FRPS"
-    echo -e "${GREEN}7.${NC} 查看 Xray 信息"
-    echo -e "${GREEN}8.${NC} 查看 FRPS 信息"
+    echo -e "${GREEN}2.${NC} 卸载 Xray + FRPS"
+    echo -e "${GREEN}3.${NC} 修改Xray端口"
+    echo -e "${GREEN}4.${NC} 修改Xray协议"
+    echo -e "${GREEN}5.${NC} 查看Xray分享链接"
+    echo -e "${GREEN}6.${NC} 查看FRPS信息"
+    echo -e "${GREEN}7.${NC} 只安装 Xray"
     echo -e "${GREEN}0.${NC} 退出脚本"
     echo -e "${YELLOW}===========================${NC}"
 }
@@ -392,40 +459,38 @@ main() {
     
     while true; do
         show_menu
-        read -p "请选择操作 [0-8]: " choice
+        read -p "请选择操作 [0-7]: " choice
         
         case $choice in
             1)
-                install_frps
                 install_xray
+                install_frps
                 add_cron_job
                 cleanup
                 show_results
                 ;;
             2)
-                install_xray
-                show_xray_info
-                ;;
-            3)
-                install_frps
-                show_frps_info
-                ;;
-            4)
-                uninstall_xray
-                ;;
-            5)
                 uninstall_frps
-                ;;
-            6)
                 uninstall_xray
-                uninstall_frps
                 log_success "所有服务已卸载"
                 ;;
-            7)
-                show_xray_info
+            3)
+                modify_xray_port
                 ;;
-            8)
+            4)
+                modify_xray_protocol
+                ;;
+            5)
+                show_xray_link
+                ;;
+            6)
                 show_frps_info
+                ;;
+            7)
+                install_xray
+                echo -e "\n${YELLOW}>>> Xray服务状态：${NC}"
+                systemctl is-active xray
+                show_xray_link
                 ;;
             0)
                 echo -e "${GREEN}退出脚本${NC}"
