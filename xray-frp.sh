@@ -29,12 +29,6 @@ FRPS_PORT="7006"
 FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 
-# 获取FRPS连接密码的函数
-gen_frps_token() {
-    echo "$FRPS_TOKEN"
-}
-FRPS_TOKEN=$(gen_frps_token)
-
 # 日志函数
 log_info() {
     if [[ "$SILENT_MODE" == "true" ]]; then
@@ -162,12 +156,6 @@ EOF
     rm -rf /usr/local/${FRP_NAME}
     
     log_success "FRPS安装成功"
-    
-    # 清理临时文件
-    cleanup
-    
-    # 添加定时清理日志任务
-    add_cron_job
 }
 
 # 安装Xray
@@ -207,35 +195,24 @@ install_xray() {
     mv geoip.dat geosite.dat /usr/local/bin/ >/dev/null 2>&1
     rm -f xray.zip LICENSE README.md >/dev/null 2>&1
 
-    # 配置参数
-    SHORTID="63b5508a"
-    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
-    PRIVATE_KEY="KHdBejDOTXA3gBwkbkC1yX3QGBiCqolz-CZsc0d2WGo"
-    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
-    PORT=443
-    ALPN="h2"
-    FLOW="xtls-rprx-vision"
-    SNI="www.bing.com"
-    DOMAIN=$(curl -s ifconfig.me)
-
-    # 获取地区信息
-    COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
-    REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
-    [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
-
-    # 生成配置文件
+    # 创建配置目录
     mkdir -p /usr/local/etc/xray >/dev/null 2>&1
+
+    # 直接使用用户提供的配置文件
     cat > /usr/local/etc/xray/config.json <<EOF
 {
+  "log": {
+    "loglevel": "warning"
+  },
   "inbounds": [
     {
-      "port": $PORT,
+      "port": 443,
       "protocol": "vless",
       "settings": {
         "clients": [
           {
-            "id": "$UUID",
-            "flow": "$FLOW"
+            "id": "9e264d67-fe47-4d2f-b55e-631a12e46a30",
+            "flow": "xtls-rprx-vision"
           }
         ],
         "decryption": "none"
@@ -245,11 +222,15 @@ install_xray() {
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "$SNI:$PORT",
+          "dest": "www.bing.com:443",
           "xver": 0,
-          "serverNames": ["$SNI"],
-          "privateKey": "$PRIVATE_KEY",
-          "shortIds": ["$SHORTID"]
+          "serverNames": [
+            "www.bing.com"
+          ],
+          "privateKey": "mNWQz072OPzfDWlGjA4UILz9gHTtTOG9bbxyJX67b2Y",
+          "shortIds": [
+            "abcdef12"
+          ]
         }
       }
     }
@@ -257,9 +238,30 @@ install_xray() {
   "outbounds": [
     {
       "protocol": "freedom",
-      "settings": {"domainStrategy": "UseIPv4"}
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      }
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
     }
-  ]
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:category-ads-all"],
+        "outboundTag": "blocked"
+      }
+    ]
+  }
 }
 EOF
 
@@ -284,17 +286,6 @@ EOF
     log_success "Xray安装成功"
 }
 
-# 添加定时任务
-add_cron_job() {
-    local cron_entry="24 15 24 * * find /usr/local -type f -name "*.log" -delete"
-    (crontab -l 2>/dev/null | grep -v -F "$cron_entry"; echo "$cron_entry") | crontab -
-}
-
-# 清理临时文件
-cleanup() {
-    rm -rf /usr/local/frp_* /usr/local/frp_*_linux_amd64
-}
-
 # 显示FRPS信息
 show_frps_info() {
     echo -e "\n${YELLOW}>>> FRPS服务状态：${NC}"
@@ -317,6 +308,21 @@ show_results() {
     echo -e "TCP端口: $FRPS_PORT"
 
     echo -e "\n${YELLOW}>>> Xray Reality 分享链接：${NC}"
+    # 使用固定参数
+    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
+    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
+    PORT=443
+    FLOW="xtls-rprx-vision"
+    SNI="www.bing.com"
+    SHORTID="abcdef12"
+    ALPN="h2"
+    DOMAIN=$(curl -s ifconfig.me)
+    
+    # 获取地区信息
+    COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
+    REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
+    [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
+    
     LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION"
     echo -e "${GREEN}$LINK${NC}\n"
 }
@@ -352,89 +358,51 @@ modify_xray_port() {
     
     # 修改配置文件
     sed -i "s/\"port\": [0-9]*/\"port\": $NEW_PORT/" /usr/local/etc/xray/config.json
-    
-    # 重新读取配置参数，保证链接完整
-    if command -v jq >/dev/null 2>&1; then
-        UUID=$(jq -r '.inbounds[0].settings.clients[0].id' /usr/local/etc/xray/config.json)
-        FLOW=$(jq -r '.inbounds[0].settings.clients[0].flow' /usr/local/etc/xray/config.json)
-        SNI=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' /usr/local/etc/xray/config.json)
-        SHORTID=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0]' /usr/local/etc/xray/config.json)
-        PRIVATE_KEY=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey' /usr/local/etc/xray/config.json)
-    else
-        UUID=$(grep -oP '"id": *"\K[^"]+' /usr/local/etc/xray/config.json)
-        FLOW=$(grep -oP '"flow": *"\K[^"]+' /usr/local/etc/xray/config.json)
-        SNI=$(grep -oP '"serverNames": *\[ *"\K[^"]+' /usr/local/etc/xray/config.json)
-        SHORTID=$(grep -oP '"shortIds": *\[ *"\K[^"]+' /usr/local/etc/xray/config.json)
-        PRIVATE_KEY=$(grep -oP '"privateKey": *"\K[^"]+' /usr/local/etc/xray/config.json)
-    fi
-    # 其它参数
-    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
-    ALPN="h2"
-    REGION="$(curl -s "https://ipinfo.io/$(curl -s ifconfig.me)/country")"
-    [ -z "$REGION" ] && REGION="CN"
-    # 国家代码转中文
-    REGION_CN=${COUNTRY_MAP[$REGION]}
-    [ -z "$REGION_CN" ] && REGION_CN="$REGION"
+    sed -i "s/\"dest\": \"www.bing.com:[0-9]*\"/\"dest\": \"www.bing.com:$NEW_PORT\"/" /usr/local/etc/xray/config.json
     
     # 重启服务
     systemctl restart xray
     
     # 更新分享链接
-    PORT=$NEW_PORT
+    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
+    PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
+    FLOW="xtls-rprx-vision"
+    SNI="www.bing.com"
+    SHORTID="abcdef12"
+    ALPN="h2"
     DOMAIN=$(curl -s ifconfig.me)
-    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION_CN"
+    
+    # 获取地区信息
+    COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
+    REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
+    [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
+    
+    LINK="vless://$UUID@$DOMAIN:$NEW_PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=tcp&alpn=$ALPN#$REGION"
     
     log_success "Xray端口已修改为: $NEW_PORT"
     echo -e "\n${YELLOW}>>> 新的Xray Reality分享链接：${NC}"
     echo -e "${GREEN}$LINK${NC}\n"
 }
 
-# 修改Xray协议
-modify_xray_protocol() {
-    log_step "1" "1" "修改Xray协议..."
-    echo "请选择协议类型："
-    echo "1. tcp"
-    echo "2. ws"
-    echo "3. grpc"
-    read -p "输入序号 [1-3]: " proto_choice
-    case $proto_choice in
-        1) NEW_PROTO="tcp" ;;
-        2) NEW_PROTO="ws" ;;
-        3) NEW_PROTO="grpc" ;;
-        *) log_error "无效选择" ;;
-    esac
-    sed -i "s/\"network\": \"[a-z0-9-]*\"/\"network\": \"$NEW_PROTO\"/" /usr/local/etc/xray/config.json
-    systemctl restart xray
-    log_success "Xray协议已修改为: $NEW_PROTO"
-}
-
 # 查看当前分享链接
 show_xray_link() {
-    # 读取参数
-    if command -v jq >/dev/null 2>&1; then
-        UUID=$(jq -r '.inbounds[0].settings.clients[0].id' /usr/local/etc/xray/config.json)
-        FLOW=$(jq -r '.inbounds[0].settings.clients[0].flow' /usr/local/etc/xray/config.json)
-        SNI=$(jq -r '.inbounds[0].streamSettings.realitySettings.serverNames[0]' /usr/local/etc/xray/config.json)
-        SHORTID=$(jq -r '.inbounds[0].streamSettings.realitySettings.shortIds[0]' /usr/local/etc/xray/config.json)
-        PRIVATE_KEY=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey' /usr/local/etc/xray/config.json)
-        PORT=$(jq -r '.inbounds[0].port' /usr/local/etc/xray/config.json)
-        NET=$(jq -r '.inbounds[0].streamSettings.network' /usr/local/etc/xray/config.json)
-    else
-        UUID=$(grep -oP '"id": *"\K[^"]+' /usr/local/etc/xray/config.json)
-        FLOW=$(grep -oP '"flow": *"\K[^"]+' /usr/local/etc/xray/config.json)
-        SNI=$(grep -oP '"serverNames": *\[ *"\K[^"]+' /usr/local/etc/xray/config.json)
-        SHORTID=$(grep -oP '"shortIds": *\[ *"\K[^"]+' /usr/local/etc/xray/config.json)
-        PRIVATE_KEY=$(grep -oP '"privateKey": *"\K[^"]+' /usr/local/etc/xray/config.json)
-        PORT=$(grep -oP '"port": *\K[0-9]+' /usr/local/etc/xray/config.json | head -1)
-        NET=$(grep -oP '"network": *"\K[^"]+' /usr/local/etc/xray/config.json)
-    fi
+    # 使用固定参数
+    UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
     PUBLIC_KEY="1A8ttanG5p970QYWyVoABiHoXYoPL-DrVFd3flFxPCo"
+    PORT=443
+    FLOW="xtls-rprx-vision"
+    SNI="www.bing.com"
+    SHORTID="abcdef12"
     ALPN="h2"
+    NET="tcp"
     DOMAIN=$(curl -s ifconfig.me)
-    REGION="$(curl -s "https://ipinfo.io/$DOMAIN/country")"
-    REGION_CN=${COUNTRY_MAP[$REGION]}
-    [ -z "$REGION_CN" ] && REGION_CN="$REGION"
-    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET&alpn=$ALPN#$REGION_CN"
+    
+    # 获取地区信息
+    COUNTRY_CODE=$(curl -s "https://ipinfo.io/$DOMAIN/country")
+    REGION=${COUNTRY_MAP[$COUNTRY_CODE]}
+    [ -z "$REGION" ] && REGION="$COUNTRY_CODE"
+    
+    LINK="vless://$UUID@$DOMAIN:$PORT?encryption=none&flow=$FLOW&security=reality&sni=$SNI&fp=chrome&pbk=$PUBLIC_KEY&sid=$SHORTID&type=$NET&alpn=$ALPN#$REGION"
     echo -e "\n${YELLOW}>>> 当前Xray Reality分享链接：${NC}"
     echo -e "${GREEN}$LINK${NC}\n"
 }
@@ -445,10 +413,9 @@ show_menu() {
     echo -e "${GREEN}1.${NC} 安装 Xray + FRPS"
     echo -e "${GREEN}2.${NC} 卸载 Xray + FRPS"
     echo -e "${GREEN}3.${NC} 修改Xray端口"
-    echo -e "${GREEN}4.${NC} 修改Xray协议"
-    echo -e "${GREEN}5.${NC} 查看Xray分享链接"
-    echo -e "${GREEN}6.${NC} 查看FRPS信息"
-    echo -e "${GREEN}7.${NC} 只安装 Xray"
+    echo -e "${GREEN}4.${NC} 查看Xray分享链接"
+    echo -e "${GREEN}5.${NC} 查看FRPS信息"
+    echo -e "${GREEN}6.${NC} 只安装 Xray"
     echo -e "${GREEN}0.${NC} 退出脚本"
     echo -e "${YELLOW}===========================${NC}"
 }
@@ -459,14 +426,12 @@ main() {
     
     while true; do
         show_menu
-        read -p "请选择操作 [0-7]: " choice
+        read -p "请选择操作 [0-6]: " choice
         
         case $choice in
             1)
                 install_xray
                 install_frps
-                add_cron_job
-                cleanup
                 show_results
                 ;;
             2)
@@ -478,15 +443,12 @@ main() {
                 modify_xray_port
                 ;;
             4)
-                modify_xray_protocol
-                ;;
-            5)
                 show_xray_link
                 ;;
-            6)
+            5)
                 show_frps_info
                 ;;
-            7)
+            6)
                 install_xray
                 echo -e "\n${YELLOW}>>> Xray服务状态：${NC}"
                 systemctl is-active xray
