@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# 颜色定义
 LIGHT_GREEN='\033[1;32m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -8,7 +7,7 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# 国家代码转中文映射表（全局只声明一次）
+
 declare -A COUNTRY_MAP=(
     ["US"]="美国" ["CN"]="中国" ["HK"]="香港" ["TW"]="台湾" ["JP"]="日本" ["KR"]="韩国"
     ["SG"]="新加坡" ["AU"]="澳大利亚" ["DE"]="德国" ["GB"]="英国" ["CA"]="加拿大" ["FR"]="法国"
@@ -23,13 +22,13 @@ declare -A COUNTRY_MAP=(
     ["UK"]="英国"
 )
 
-# FRPS配置
+
 FRP_VERSION="v0.62.1"
 FRPS_PORT="7006"
 FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 
-# Xray配置参数（全局只声明一次）
+
 UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
 PRIVATE_KEY="mNWQz072OPzfDWlGjA4UILz9gHTtTOG9bbxyJX67b2Y"
 PUBLIC_KEY="NBKTazDEILwl4YB7m-RU2WDUOwzzv6eO67Eg3_F4ml8"
@@ -39,7 +38,7 @@ SNI="www.bing.com"
 SHORTID="abcdef12"
 NET="tcp"
 
-# 日志函数
+
 log_info() {
     if [[ "$SILENT_MODE" == "true" ]]; then
         return
@@ -67,14 +66,14 @@ log_sub_step() {
     echo -e "${GREEN}[$1/$2]$3${NC}"
 }
 
-# 检查root权限
+
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         log_error "请使用 sudo 或 root 权限运行脚本"
     fi
 }
 
-# 卸载旧版FRPS
+
 uninstall_frps() {
     log_info "卸载旧版FRPS服务..."
     systemctl stop frps >/dev/null 2>&1
@@ -243,11 +242,22 @@ install_xray() {
           ]
         }
       }
+    },
+    {
+      "tag": "frps-in",
+      "port": ${FRPS_PORT},
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1",
+        "port": ${FRPS_PORT},
+        "network": "tcp"
+      }
     }
   ],
   "outbounds": [
     {
       "protocol": "freedom",
+      "tag": "direct",
       "settings": {
         "domainStrategy": "UseIPv4"
       }
@@ -260,6 +270,11 @@ install_xray() {
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["frps-in"],
+        "outboundTag": "direct"
+      },
       {
         "type": "field",
         "ip": ["geoip:private"],
