@@ -101,7 +101,7 @@ auth.token = "${FRPS_TOKEN}"
 EOF
     if [ $? -ne 0 ]; then
         log_error "写入 frps.toml 配置文件失败"
-    }
+    fi
     cat > /etc/systemd/system/frps.service << EOF
 [Unit]
 Description=Frp Server Service
@@ -118,7 +118,7 @@ WantedBy=multi-user.target
 EOF
     if [ $? -ne 0 ]; then
         log_error "写入 frps.service 文件失败"
-    }
+    fi
     systemctl daemon-reload
     if [ $? -ne 0 ]; then
         log_error "重新加载 systemd 配置失败"
