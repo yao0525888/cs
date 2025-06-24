@@ -30,11 +30,11 @@ SILENT_MODE=true
 
 
 UUID="9e264d67-fe47-4d2f-b55e-631a12e46a30"
-PRIVATE_KEY="mNWQz072OPzfDWlGjA4UILz9gHTtTOG9bbxyJX67b2Y"
-PUBLIC_KEY="NBKTazDEILwl4YB7m-RU2WDUOwzzv6eO67Eg3_F4ml8"
+PRIVATE_KEY="SBznh0LAR5I-Xo2XDMAJrCC_UoS1Wb7gjycfKTFyZmA"
+PUBLIC_KEY="n5cQsnGAxadThor3_U5fIFafC24rA0-OrA3vQj06onU"
 PORT=443
 FLOW="xtls-rprx-vision"
-SNI="www.bing.com"
+SNI="dash.cloudflare.com"
 SHORTID="abcdef12"
 NET="tcp"
 
@@ -216,7 +216,7 @@ install_xray() {
   },
   "inbounds": [
     {
-      "port": 443,
+      "port": $PORT,
       "listen": "0.0.0.0",
       "protocol": "vless",
       "settings": {
