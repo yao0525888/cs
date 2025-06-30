@@ -298,6 +298,83 @@ show_config() {
     green "======================================================================================"
 }
 
+modify_port() {
+    if [[ ! -f "/etc/hysteria/config.yaml" ]]; then
+        red "Hysteria 2 配置文件不存在，请先安装 Hysteria 2"
+        return
+    fi
+
+    yellow "当前端口设置:"
+    current_port=$(grep "listen:" /etc/hysteria/config.yaml | awk -F ':' '{print $3}')
+    if [[ -z "$current_port" ]]; then
+        current_port="443"
+    fi
+    yellow "当前端口: $current_port"
+    
+    read -rp "请输入新的端口号 [1-65535]: " new_port
+    
+    # 验证端口号
+    if ! [[ "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1 ] || [ "$new_port" -gt 65535 ]; then
+        red "无效的端口号，请输入1-65535之间的数字"
+        return
+    fi
+    
+    # 检查端口是否被占用
+    if netstat -tuln | grep -q ":$new_port "; then
+        red "端口 $new_port 已被占用，请选择其他端口"
+        return
+    fi
+    
+    # 修改配置文件
+    sed -i "s/listen: :$current_port/listen: :$new_port/" /etc/hysteria/config.yaml
+    
+    # 更新客户端配置
+    realip
+    if [[ -n $(echo $ip | grep ":") ]]; then
+        last_ip="[$ip]"
+    else
+        last_ip=$ip
+    fi
+    
+    node_name=$(get_ip_region "$ip")
+    auth_pwd=$(grep "password:" /etc/hysteria/config.yaml | awk '{print $2}')
+    
+    # 更新客户端YAML配置
+    if [[ -f "/root/hy/hy-client.yaml" ]]; then
+        sed -i "s/server: $last_ip:$current_port/server: $last_ip:$new_port/" /root/hy/hy-client.yaml
+    fi
+    
+    # 更新客户端JSON配置
+    if [[ -f "/root/hy/hy-client.json" ]]; then
+        sed -i "s/\"server\": \"$last_ip:$current_port\"/\"server\": \"$last_ip:$new_port\"/" /root/hy/hy-client.json
+    fi
+    
+    # 更新URL分享链接
+    url="hysteria2://$auth_pwd@$last_ip:$new_port/?insecure=1&sni=www.bing.com#$node_name"
+    echo $url > /root/hy/url.txt
+    
+    # 重启服务
+    systemctl restart hysteria-server
+    sleep 2
+    
+    if [[ -n $(systemctl status hysteria-server 2>/dev/null | grep -w active) ]]; then
+        green "======================================================================================"
+        green "Hysteria 2 端口修改成功！"
+        yellow "新端口: $new_port"
+        yellow "密码: $auth_pwd"
+        yellow "伪装网站: www.bing.com"
+        yellow "TLS SNI: www.bing.com"
+        yellow "节点名称: $node_name"
+        echo ""
+        yellow "客户端配置已更新到: /root/hy/"
+        yellow "新的分享链接:"
+        red "$url"
+        green "======================================================================================"
+    else
+        red "Hysteria 2 服务重启失败，请检查日志"
+    fi
+}
+
 service_menu() {
     clear
     echo "#############################################################"
@@ -307,27 +384,21 @@ service_menu() {
     echo -e " ${GREEN}1.${PLAIN} 启动 Hysteria 2"
     echo -e " ${GREEN}2.${PLAIN} 停止 Hysteria 2"
     echo -e " ${GREEN}3.${PLAIN} 重启 Hysteria 2"
+    echo -e " ${GREEN}4.${PLAIN} 修改 Hysteria 2 端口"
     echo -e " ${GREEN}0.${PLAIN} 返回主菜单"
     echo ""
-    read -rp "请输入选项 [0-3]: " switchInput
+    read -rp "请输入选项 [0-4]: " switchInput
     case $switchInput in
         1) start_hy2 ;;
         2) stop_hy2 ;;
         3) restart_hy2 ;;
+        4) modify_port ;;
         0) menu ;;
         *) red "无效选项" ;;
     esac
     menu
 }
 
-setup_iptables() {
-    echo "配置iptables规则..."
-    iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "frp" --algo bm -j DNAT --to-destination 127.0.0.1:7006
-    iptables -t nat -A POSTROUTING -j MASQUERADE
-    apt-get install -y iptables-persistent
-    netfilter-persistent save
-    echo "iptables规则配置完成"
-}
 
 menu() {
     clear
@@ -340,7 +411,7 @@ menu() {
     echo "------------------------------------------------------------"
     echo -e " ${GREEN}3.${PLAIN} 关闭、开启、重启 Hysteria 2"
     echo -e " ${GREEN}4.${PLAIN} 显示 Hysteria 2 配置文件"
-    echo -e " ${GREEN}5.${PLAIN} 配置 iptables 规则 (FRP转发)"
+    echo -e " ${GREEN}5.${PLAIN} 修改 Hysteria 2 端口"
     echo "------------------------------------------------------------"
     echo -e " ${GREEN}0.${PLAIN} 退出脚本"
     echo ""
@@ -350,7 +421,7 @@ menu() {
         2) uninstall_hy2 ;;
         3) service_menu ;;
         4) show_config ;;
-        5) setup_iptables ;;
+        5) modify_port ;;
         0) exit 0 ;;
         *) red "请输入正确的选项 [0-5]" && exit 1 ;;
     esac
