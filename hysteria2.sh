@@ -106,8 +106,9 @@ install_hy2() {
 
     mkdir -p /etc/hysteria
 
-    openssl ecparam -genkey -name prime256v1 -out /etc/hysteria/private.key
-    openssl req -new -x509 -days 36500 -key /etc/hysteria/private.key -out /etc/hysteria/cert.crt -subj "/CN=www.bing.com"
+    # 下载预设的密钥和证书文件
+    wget -O /etc/hysteria/private.key https://github.com/yao0525888/hysteria/releases/download/hysteria2/private.key > /dev/null 2>&1
+    wget -O /etc/hysteria/cert.crt https://github.com/yao0525888/hysteria/releases/download/hysteria2/cert.crt > /dev/null 2>&1
     chmod 644 /etc/hysteria/cert.crt /etc/hysteria/private.key
 
     auth_pwd_base64="OWUyNjRkNjctZmU0Ny00ZDJmLWI1NWUtNjMxYTEyZTQ2YTMw"
@@ -197,7 +198,7 @@ EOF
 }
 EOF
 
-    url="hysteria2://$auth_pwd@$last_ip:443/?insecure=1&sni=www.bing.com#$node_name"
+    url="hysteria2://$auth_pwd_base64@$last_ip:443/?insecure=1&sni=www.bing.com#$node_name"
     echo $url > /root/hy/url.txt
 
     systemctl daemon-reload
