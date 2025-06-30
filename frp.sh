@@ -12,7 +12,7 @@ SUCCESS="${BOLD}${LIGHT_GREEN}"
 ADMIN_PASSWORD="Qaz123456!"
 FRP_VERSION="v0.62.1"
 FRPS_PORT="7007"
-FRPS_KCP_PORT="7006"
+FRPS_KCP_PORT="7007"
 FRPS_TOKEN="DFRN2vbG123"
 SILENT_MODE=true
 SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
@@ -107,6 +107,7 @@ kcpBindPort = ${FRPS_KCP_PORT}
 auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
 transport.tls.force = true
+protocol = "udp"
 EOF
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 写入 frps.toml 配置文件失败！${NC}"
@@ -187,7 +188,7 @@ show_results() {
     echo -e "${YELLOW}>>> 服务器信息${NC}"
     echo -e "服务器 IP: ${WHITE}${SERVER_IP}${NC}"
     echo -e "FRP 版本: ${WHITE}${FRP_VERSION}${NC}"
-    echo -e "FRPS 端口: ${WHITE}${FRPS_PORT}/tcp${NC}"
+    echo -e "FRPS 端口: ${WHITE}${FRPS_PORT}/udp${NC}"
     echo -e "FRPS KCP 端口: ${WHITE}${FRPS_KCP_PORT}/udp${NC}"
     echo -e "FRPS 令牌: ${WHITE}${FRPS_TOKEN}${NC}" 
 }
