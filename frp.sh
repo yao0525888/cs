@@ -187,8 +187,8 @@ show_results() {
     echo -e "${YELLOW}>>> 服务器信息${NC}"
     echo -e "服务器 IP: ${WHITE}${SERVER_IP}${NC}"
     echo -e "FRP 版本: ${WHITE}${FRP_VERSION}${NC}"
-    echo -e "FRPS 端口: ${WHITE}${FRPS_PORT}/udp${NC}"
-    echo -e "FRPS KCP 端口: ${WHITE}${FRPS_KCP_PORT}/udp${NC}"
+    echo -e "FRPS 端口: ${WHITE}${FRPS_PORT}/TCP${NC}"
+    echo -e "FRPS KCP 端口: ${WHITE}${FRPS_KCP_PORT}/UDP${NC}"
     echo -e "FRPS 令牌: ${WHITE}${FRPS_TOKEN}${NC}" 
 }
 
