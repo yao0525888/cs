@@ -190,14 +190,19 @@ uninstall_all() {
 show_results() {
     local frps_status=$(systemctl is-active frps 2>/dev/null || echo "inactive")
     SERVER_IP=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
-    echo -e "${YELLOW}>>> FRPS${NC}${WHITE}服务状态:${NC}"
-    echo -e "FRPS: ${WHITE}${frps_status}${NC}"
-    echo -e "${YELLOW}>>> FRPS${NC}${WHITE}信息:${NC}"
-    echo -e "FRPS 端口: ${WHITE}${FRPS_PORT}${NC}"
-    echo -e "FRPS 令牌: ${WHITE}${FRPS_TOKEN}${NC}"
-    echo -e "FRPS 管理界面: ${WHITE}http://${SERVER_IP}:${FRPS_DASHBOARD_PORT}${NC}"
-    echo -e "FRPS 管理用户: ${WHITE}${FRPS_DASHBOARD_USER}${NC}"
-    echo -e "FRPS 管理密码: ${WHITE}${FRPS_DASHBOARD_PWD}${NC}"
+    echo -e "${YELLOW}>>> 服务状态${NC}"
+    echo -e "FRPS 服务: ${WHITE}${frps_status}${NC}"
+    echo -e "${YELLOW}>>> 服务器信息${NC}"
+    echo -e "服务器 IP: ${WHITE}${SERVER_IP}${NC}"
+    echo -e "FRP 版本: ${WHITE}${FRP_VERSION}${NC}"
+    echo -e "${YELLOW}>>> 连接信息${NC}"
+    echo -e "FRPS 端口: ${WHITE}${FRPS_PORT}/tcp${NC}"
+    echo -e "FRPS KCP 端口: ${WHITE}${FRPS_KCP_PORT}/udp${NC}"
+    echo -e "FRPS 令牌: ${WHITE}${FRPS_TOKEN}${NC}" 
+    echo -e "${YELLOW}>>> 管理界面${NC}"
+    echo -e "管理界面地址: ${WHITE}http://${SERVER_IP}:${FRPS_DASHBOARD_PORT}${NC}"
+    echo -e "管理用户名: ${WHITE}${FRPS_DASHBOARD_USER}${NC}"
+    echo -e "管理密码: ${WHITE}${FRPS_DASHBOARD_PWD}${NC}"
 }
 
 install_frp() {
