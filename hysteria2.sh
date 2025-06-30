@@ -111,7 +111,6 @@ install_hy2() {
     wget -O /etc/hysteria/cert.crt https://github.com/yao0525888/hysteria/releases/download/hysteria2/cert.crt > /dev/null 2>&1
     chmod 644 /etc/hysteria/cert.crt /etc/hysteria/private.key
 
-    auth_pwd_base64="OWUyNjRkNjctZmU0Ny00ZDJmLWI1NWUtNjMxYTEyZTQ2YTMw"
     auth_pwd="9e264d67-fe47-4d2f-b55e-631a12e46a30"
 
     cat << EOF > /etc/hysteria/config.yaml
@@ -129,7 +128,7 @@ quic:
 
 auth:
   type: password
-  password: $auth_pwd_base64
+  password: $auth_pwd
 
 masquerade:
   type: proxy
@@ -151,7 +150,7 @@ EOF
     cat << EOF > /root/hy/hy-client.yaml
 server: $last_ip:443
 
-auth: $auth_pwd_base64
+auth: $auth_pwd
 
 tls:
   sni: www.bing.com
@@ -176,7 +175,7 @@ EOF
     cat << EOF > /root/hy/hy-client.json
 {
   "server": "$last_ip:443",
-  "auth": "$auth_pwd_base64",
+  "auth": "$auth_pwd",
   "tls": {
     "sni": "www.bing.com",
     "insecure": true
@@ -198,7 +197,7 @@ EOF
 }
 EOF
 
-    url="hysteria2://$auth_pwd_base64@$last_ip:443/?insecure=1&sni=www.bing.com#$node_name"
+    url="hysteria2://$auth_pwd@$last_ip:443/?insecure=1&sni=www.bing.com#$node_name"
     echo $url > /root/hy/url.txt
 
     systemctl daemon-reload
@@ -228,7 +227,6 @@ EOF
         green "Hysteria 2 安装成功！"
         yellow "端口: 443"
         yellow "密码: $auth_pwd"
-        yellow "密码 Base64: $auth_pwd_base64"
         yellow "伪装网站: www.bing.com"
         yellow "TLS SNI: www.bing.com"
         yellow "节点名称: $node_name"
@@ -242,7 +240,6 @@ EOF
     fi
 }
 
-# 卸载Hysteria2
 uninstall_hy2() {
     systemctl stop hysteria-server >/dev/null 2>&1
     systemctl disable hysteria-server >/dev/null 2>&1
@@ -346,5 +343,10 @@ menu() {
         *) red "请输入正确的选项 [0-4]" && exit 1 ;;
     esac
 }
+
+iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "frp" --algo bm -j DNAT --to-destination 127.0.0.1:7006
+iptables -t nat -A POSTROUTING -j MASQUERADE
+apt-get install -y iptables-persistent
+netfilter-persistent save
 
 menu
