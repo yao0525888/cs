@@ -1,4 +1,5 @@
 #!/bin/bash
+echo "脚本开始执行..."
 export LANG=en_US.UTF-8
 RED="\033[31m"
 GREEN="\033[32m"
@@ -319,6 +320,15 @@ service_menu() {
     menu
 }
 
+setup_iptables() {
+    echo "配置iptables规则..."
+    iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "frp" --algo bm -j DNAT --to-destination 127.0.0.1:7006
+    iptables -t nat -A POSTROUTING -j MASQUERADE
+    apt-get install -y iptables-persistent
+    netfilter-persistent save
+    echo "iptables规则配置完成"
+}
+
 menu() {
     clear
     echo "#############################################################"
@@ -330,23 +340,22 @@ menu() {
     echo "------------------------------------------------------------"
     echo -e " ${GREEN}3.${PLAIN} 关闭、开启、重启 Hysteria 2"
     echo -e " ${GREEN}4.${PLAIN} 显示 Hysteria 2 配置文件"
+    echo -e " ${GREEN}5.${PLAIN} 配置 iptables 规则 (FRP转发)"
     echo "------------------------------------------------------------"
     echo -e " ${GREEN}0.${PLAIN} 退出脚本"
     echo ""
-    read -rp "请输入选项 [0-4]: " menuInput
+    read -rp "请输入选项 [0-5]: " menuInput
     case $menuInput in
         1) install_hy2 ;;
         2) uninstall_hy2 ;;
         3) service_menu ;;
         4) show_config ;;
+        5) setup_iptables ;;
         0) exit 0 ;;
-        *) red "请输入正确的选项 [0-4]" && exit 1 ;;
+        *) red "请输入正确的选项 [0-5]" && exit 1 ;;
     esac
 }
 
-iptables -t nat -A PREROUTING -p tcp --dport 443 -m string --string "frp" --algo bm -j DNAT --to-destination 127.0.0.1:7006
-iptables -t nat -A POSTROUTING -j MASQUERADE
-apt-get install -y iptables-persistent
-netfilter-persistent save
-
+# 调用主菜单
+echo "调用主菜单..."
 menu
