@@ -107,7 +107,6 @@ kcpBindPort = ${FRPS_KCP_PORT}
 auth.method = "token"
 auth.token = "${FRPS_TOKEN}"
 transport.tls.force = true
-protocol = "udp"
 EOF
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 写入 frps.toml 配置文件失败！${NC}"
