@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Ansible一键安装配置脚本
-# 适用于Debian/Ubuntu系统
+# 支持多种Linux发行版
 
 # 设置颜色
 GREEN='\033[0;32m'
@@ -38,9 +38,38 @@ check_status() {
   fi
 }
 
-# 函数: 安装Ansible
-install_ansible() {
-  echo -e "${YELLOW}[1/6] 正在安装Ansible...${NC}"
+# 函数: 检测Linux发行版
+detect_distro() {
+  echo -e "${YELLOW}检测Linux发行版...${NC}"
+  
+  # 检查是否存在lsb_release命令
+  if command -v lsb_release &> /dev/null; then
+    DISTRO=$(lsb_release -si)
+    VERSION=$(lsb_release -sr)
+  # 检查是否存在/etc/os-release文件
+  elif [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO=$ID
+    VERSION=$VERSION_ID
+  # 检查是否存在/etc/redhat-release文件
+  elif [ -f /etc/redhat-release ]; then
+    DISTRO="rhel"
+    VERSION=$(cat /etc/redhat-release | sed 's/.*release \([0-9]\).*/\1/')
+  else
+    DISTRO="unknown"
+    VERSION="unknown"
+  fi
+  
+  # 转换为小写
+  DISTRO=$(echo "$DISTRO" | tr '[:upper:]' '[:lower:]')
+  
+  echo -e "检测到系统: ${GREEN}$DISTRO $VERSION${NC}"
+  return 0
+}
+
+# 函数: 安装Ansible (Debian/Ubuntu)
+install_ansible_debian() {
+  echo -e "${YELLOW}使用APT安装Ansible...${NC}"
   
   # 更新软件包列表
   echo "正在更新软件包列表..."
@@ -49,22 +78,134 @@ install_ansible() {
   
   # 安装必要的依赖
   echo "正在安装依赖..."
-  apt-get install -y software-properties-common curl gnupg lsb-release
+  apt-get install -y software-properties-common curl gnupg lsb-release python3 python3-pip
   check_status "安装依赖"
   
-  # 使用官方PPA源安装
-  echo "添加Ansible PPA仓库..."
-  apt-add-repository --yes --update ppa:ansible/ansible
-  check_status "添加Ansible PPA仓库"
+  # 尝试添加PPA仓库，如果失败则使用标准仓库
+  echo "添加Ansible仓库..."
+  if apt-add-repository --yes --update ppa:ansible/ansible; then
+    check_status "添加Ansible PPA仓库"
+  else
+    echo -e "${YELLOW}PPA添加失败，使用标准仓库安装${NC}"
+    # 直接安装ansible
+    apt-get install -y ansible
+    check_status "安装Ansible(标准仓库)"
+  fi
   
-  # 安装Ansible
-  echo "安装Ansible..."
-  apt-get install -y ansible
-  check_status "安装Ansible"
+  # 如果上面的PPA添加成功，安装ansible
+  if [ $? -eq 0 ]; then
+    echo "安装Ansible..."
+    apt-get install -y ansible
+    check_status "安装Ansible"
+  fi
+}
+
+# 函数: 安装Ansible (RHEL/CentOS)
+install_ansible_rhel() {
+  echo -e "${YELLOW}使用YUM/DNF安装Ansible...${NC}"
+  
+  # 检查版本
+  if [[ "$VERSION" == "7" ]]; then
+    # RHEL/CentOS 7 使用EPEL和yum
+    echo "安装EPEL仓库..."
+    yum install -y epel-release
+    check_status "安装EPEL仓库"
+    
+    echo "安装依赖..."
+    yum install -y python3 python3-pip
+    check_status "安装依赖"
+    
+    echo "安装Ansible..."
+    yum install -y ansible
+    check_status "安装Ansible"
+  else
+    # RHEL/CentOS 8+ 使用dnf
+    echo "安装依赖..."
+    dnf install -y python3 python3-pip
+    check_status "安装依赖"
+    
+    echo "启用EPEL仓库..."
+    dnf install -y epel-release
+    check_status "启用EPEL仓库"
+    
+    echo "安装Ansible..."
+    dnf install -y ansible
+    check_status "安装Ansible"
+  fi
+}
+
+# 函数: 通过pip安装Ansible
+install_ansible_pip() {
+  echo -e "${YELLOW}使用pip安装Ansible...${NC}"
+  
+  # 安装python3和pip
+  if [[ "$DISTRO" == "debian" || "$DISTRO" == "ubuntu" ]]; then
+    apt-get update -y
+    apt-get install -y python3 python3-pip
+  elif [[ "$DISTRO" == "rhel" || "$DISTRO" == "centos" || "$DISTRO" == "fedora" ]]; then
+    if [[ "$VERSION" == "7" ]]; then
+      yum install -y python3 python3-pip
+    else
+      dnf install -y python3 python3-pip
+    fi
+  else
+    echo -e "${YELLOW}未知发行版，尝试通用方法安装Python...${NC}"
+    # 尝试通用方法
+    if command -v apt-get &> /dev/null; then
+      apt-get update -y
+      apt-get install -y python3 python3-pip
+    elif command -v yum &> /dev/null; then
+      yum install -y python3 python3-pip
+    elif command -v dnf &> /dev/null; then
+      dnf install -y python3 python3-pip
+    else
+      echo -e "${RED}无法安装Python和pip，请手动安装后重试${NC}"
+      exit 1
+    fi
+  fi
+  check_status "安装Python和pip"
+  
+  # 升级pip
+  python3 -m pip install --upgrade pip
+  check_status "升级pip"
+  
+  # 安装ansible
+  python3 -m pip install ansible
+  check_status "通过pip安装Ansible"
+}
+
+# 函数: 安装Ansible
+install_ansible() {
+  echo -e "${YELLOW}[1/6] 正在安装Ansible...${NC}"
+  
+  # 检测发行版
+  detect_distro
+  
+  # 根据发行版选择安装方法
+  if [[ "$DISTRO" == "debian" || "$DISTRO" == "ubuntu" ]]; then
+    install_ansible_debian
+  elif [[ "$DISTRO" == "rhel" || "$DISTRO" == "centos" || "$DISTRO" == "fedora" || "$DISTRO" == "rocky" || "$DISTRO" == "almalinux" ]]; then
+    install_ansible_rhel
+  else
+    echo -e "${YELLOW}未知发行版，尝试使用pip安装...${NC}"
+    install_ansible_pip
+  fi
   
   # 验证安装
-  ANSIBLE_VERSION=$(ansible --version | head -n1)
-  echo -e "${GREEN}Ansible安装完成! 版本: $ANSIBLE_VERSION${NC}"
+  if command -v ansible &> /dev/null; then
+    ANSIBLE_VERSION=$(ansible --version | head -n1)
+    echo -e "${GREEN}Ansible安装完成! 版本: $ANSIBLE_VERSION${NC}"
+  else
+    echo -e "${RED}Ansible安装失败！尝试使用pip安装...${NC}"
+    install_ansible_pip
+    if command -v ansible &> /dev/null; then
+      ANSIBLE_VERSION=$(ansible --version | head -n1)
+      echo -e "${GREEN}Ansible通过pip安装完成! 版本: $ANSIBLE_VERSION${NC}"
+    else
+      echo -e "${RED}Ansible安装失败！请手动安装${NC}"
+      exit 1
+    fi
+  fi
 }
 
 # 函数: 创建项目目录结构
@@ -134,6 +275,15 @@ EOF
 # db1 ansible_host=192.168.1.201
 # db2 ansible_host=192.168.1.202
 
+[windows]
+# win1 ansible_host=192.168.1.150 ansible_user=Administrator ansible_password=Password
+# win2 ansible_host=192.168.1.151 ansible_user=Administrator ansible_password=Password
+
+[windows:vars]
+ansible_connection=winrm
+ansible_winrm_server_cert_validation=ignore
+ansible_port=5985
+
 [all:vars]
 ansible_ssh_user=root
 # ansible_ssh_private_key_file=~/.ssh/id_rsa
@@ -160,6 +310,13 @@ EOF
     update_cache: yes
     cache_valid_time: 3600
   when: ansible_os_family == "Debian"
+
+- name: 确保系统已更新(RedHat系列)
+  yum:
+    name: '*'
+    state: latest
+    update_cache: yes
+  when: ansible_os_family == "RedHat"
 
 - name: 安装基础软件包
   package:
@@ -209,6 +366,25 @@ EOF
         msg: "成功连接到 {{ inventory_hostname }}"
 EOF
   check_status "创建ping测试脚本"
+
+  # 创建Windows测试脚本
+  cat > $PROJECT_DIR/playbooks/win_test.yml << EOF
+---
+# Windows连接测试playbook
+- name: Windows连接测试
+  hosts: windows
+  gather_facts: no
+  
+  tasks:
+    - name: 运行PowerShell命令
+      win_shell: Get-ComputerInfo | Select-Object WindowsProductName, OsVersion, OsArchitecture
+      register: computer_info
+      
+    - name: 显示Windows信息
+      debug:
+        var: computer_info.stdout_lines
+EOF
+  check_status "创建Windows测试脚本"
 }
 
 # 函数: 创建便捷脚本
@@ -314,6 +490,88 @@ echo "配置: \$HOST_LINE"
 EOF
   chmod +x $PROJECT_DIR/add_host.sh
   check_status "创建主机添加脚本"
+  
+  # 创建Windows主机添加脚本
+  cat > $PROJECT_DIR/add_win_host.sh << EOF
+#!/bin/bash
+
+# Ansible添加Windows主机脚本
+
+# 设置颜色
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # 无颜色
+
+# 检查参数
+if [ \$# -lt 4 ]; then
+  echo -e "\${RED}用法: \$0 <主机组> <主机名> <IP地址> <用户名> [密码]${NC}"
+  echo -e "例如: \$0 windows win-server1 192.168.1.100 Administrator Password123"
+  exit 1
+fi
+
+GROUP=\$1
+HOST=\$2
+IP=\$3
+USER=\$4
+PASS=\$5
+
+HOSTS_FILE="./inventory/hosts"
+
+# 检查pywinrm是否安装
+if ! pip3 list | grep -q pywinrm; then
+  echo -e "\${YELLOW}安装pywinrm模块...${NC}"
+  pip3 install pywinrm
+  if [ \$? -ne 0 ]; then
+    echo -e "\${RED}错误: 无法安装pywinrm模块${NC}"
+    echo -e "请手动安装: pip3 install pywinrm"
+    exit 1
+  fi
+  echo -e "\${GREEN}pywinrm模块安装成功${NC}"
+fi
+
+# 检查Windows组是否存在
+if ! grep -q "^\[\$GROUP\]" \$HOSTS_FILE; then
+  echo -e "\${YELLOW}创建Windows主机组: \$GROUP${NC}"
+  echo "" >> \$HOSTS_FILE
+  echo "[\$GROUP]" >> \$HOSTS_FILE
+  echo "# Windows主机配置" >> \$HOSTS_FILE
+  
+  # 添加组变量
+  echo "" >> \$HOSTS_FILE
+  echo "[\$GROUP:vars]" >> \$HOSTS_FILE
+  echo "ansible_connection=winrm" >> \$HOSTS_FILE
+  echo "ansible_winrm_server_cert_validation=ignore" >> \$HOSTS_FILE
+  echo "ansible_port=5985" >> \$HOSTS_FILE
+  echo "# ansible_winrm_transport=ssl" >> \$HOSTS_FILE
+  echo "# ansible_port=5986" >> \$HOSTS_FILE
+fi
+
+# 构建主机配置行
+HOST_LINE="\$HOST ansible_host=\$IP ansible_user=\$USER"
+if [ ! -z "\$PASS" ]; then
+  HOST_LINE="\$HOST_LINE ansible_password=\$PASS"
+fi
+
+# 检查主机是否已存在
+if grep -q "^\$HOST " \$HOSTS_FILE; then
+  echo -e "\${YELLOW}更新现有Windows主机: \$HOST${NC}"
+  sed -i "/^\$HOST /c\\\$HOST_LINE" \$HOSTS_FILE
+else
+  # 在组下添加主机
+  sed -i "/^\[\$GROUP\]/a\\\$HOST_LINE" \$HOSTS_FILE
+fi
+
+echo -e "\${GREEN}Windows主机 '\$HOST' 添加/更新成功!${NC}"
+echo -e "配置: \$HOST_LINE"
+
+echo ""
+echo -e "\${YELLOW}Windows主机管理提示:${NC}"
+echo -e "1. 确保Windows主机已配置WinRM (可使用ConfigureRemotingForAnsible.ps1脚本)"
+echo -e "2. 测试连接: ./run.sh win_test.yml"
+EOF
+  chmod +x $PROJECT_DIR/add_win_host.sh
+  check_status "创建Windows主机添加脚本"
 }
 
 # 函数: 创建README文件
@@ -349,14 +607,16 @@ create_readme() {
 ├── files/                 # 全局文件目录
 ├── playbooks/             # Playbook目录
 │   ├── site.yml           # 主playbook
-│   └── ping.yml           # Ping测试playbook
+│   ├── ping.yml           # Ping测试playbook
+│   └── win_test.yml       # Windows测试playbook
 ├── run.sh                 # 运行脚本
-└── add_host.sh            # 主机添加脚本
+├── add_host.sh            # 主机添加脚本
+└── add_win_host.sh        # Windows主机添加脚本
 \`\`\`
 
 ## 使用方法
 
-### 1. 添加主机
+### 1. 添加Linux/Unix主机
 
 使用\`add_host.sh\`脚本添加主机:
 
@@ -370,19 +630,34 @@ create_readme() {
 ./add_host.sh webservers web1 192.168.1.101 root password
 \`\`\`
 
-### 2. 测试主机连接
+### 2. 添加Windows主机
+
+使用\`add_win_host.sh\`脚本添加Windows主机:
 
 \`\`\`bash
-./run.sh ping.yml
+./add_win_host.sh <主机组> <主机名> <IP地址> <用户名> [密码]
 \`\`\`
 
-### 3. 运行Playbook
+例如:
+
+\`\`\`bash
+./add_win_host.sh windows win1 192.168.1.150 Administrator Password123
+\`\`\`
+
+### 3. 测试主机连接
+
+\`\`\`bash
+./run.sh ping.yml         # 测试Linux/Unix主机
+./run.sh win_test.yml     # 测试Windows主机
+\`\`\`
+
+### 4. 运行Playbook
 
 \`\`\`bash
 ./run.sh site.yml
 \`\`\`
 
-### 4. 限制主机或组
+### 5. 限制主机或组
 
 \`\`\`bash
 ./run.sh site.yml -l webservers
@@ -406,6 +681,17 @@ ansible-galaxy init roles/新角色名
 
 确保目标服务器允许SSH连接，并且配置了正确的认证方式。
 
+### Windows连接问题
+
+确保Windows主机已配置WinRM服务。可以在Windows主机上以管理员身份运行以下PowerShell命令:
+
+\`\`\`powershell
+\$url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
+\$file = "\$env:temp\ConfigureRemotingForAnsible.ps1"
+(New-Object -TypeName System.Net.WebClient).DownloadFile(\$url, \$file)
+powershell.exe -ExecutionPolicy ByPass -File \$file
+\`\`\`
+
 ### 权限问题
 
 确保使用\`become: yes\`获取提升权限，或在命令行使用\`-b\`参数:
@@ -415,6 +701,79 @@ ansible-galaxy init roles/新角色名
 \`\`\`
 EOF
   check_status "创建README.md"
+  
+  # 创建Windows主机配置指南
+  cat > $PROJECT_DIR/windows_setup.md << EOF
+# Ansible连接Windows主机配置指南
+
+Ansible默认通过SSH连接Linux/Unix主机，但对于Windows主机，Ansible使用WinRM (Windows Remote Management)协议进行连接。以下是详细的配置步骤：
+
+## 1. 安装必要的Python包
+
+在Ansible控制节点上，安装以下Python包：
+
+\`\`\`bash
+pip3 install pywinrm
+\`\`\`
+
+## 2. 配置Windows主机
+
+Windows主机需要启用并配置WinRM服务。在Windows主机上以管理员身份运行PowerShell，执行以下命令：
+
+\`\`\`powershell
+# 配置WinRM
+winrm quickconfig -q
+winrm set winrm/config/service/auth '@{Basic="true"}'
+winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="1024"}'
+
+# 设置WinRM监听器
+New-NetFirewallRule -DisplayName "Windows Remote Management (HTTP-In)" -Name "Windows Remote Management (HTTP-In)" -Profile Any -LocalPort 5985 -Protocol TCP
+\`\`\`
+
+更安全的方式是使用HTTPS连接，需要配置SSL证书：
+
+\`\`\`powershell
+# 创建自签名证书
+\$cert = New-SelfSignedCertificate -DnsName \$env:COMPUTERNAME -CertStoreLocation Cert:\LocalMachine\My
+
+# 创建HTTPS监听器
+winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=\`"\$(\$env:COMPUTERNAME)\`";CertificateThumbprint=\`"\$(\$cert.Thumbprint)\`"}"
+
+# 开放5986端口(HTTPS)
+New-NetFirewallRule -DisplayName "Windows Remote Management (HTTPS-In)" -Name "Windows Remote Management (HTTPS-In)" -Profile Any -LocalPort 5986 -Protocol TCP
+\`\`\`
+
+## 3. 一键配置脚本
+
+可以使用Microsoft提供的ConfigureRemotingForAnsible.ps1脚本进行自动配置。在Windows主机上以管理员身份运行PowerShell：
+
+\`\`\`powershell
+\$url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
+\$file = "\$env:temp\ConfigureRemotingForAnsible.ps1"
+(New-Object -TypeName System.Net.WebClient).DownloadFile(\$url, \$file)
+powershell.exe -ExecutionPolicy ByPass -File \$file
+\`\`\`
+
+## 4. 测试连接
+
+添加Windows主机后，可以使用以下命令测试连接：
+
+\`\`\`bash
+./run.sh win_test.yml
+\`\`\`
+
+## 5. 常见问题排查
+
+如果连接失败，请检查：
+
+1. Windows防火墙是否允许5985(HTTP)或5986(HTTPS)端口
+2. WinRM服务是否运行 (\`Get-Service winrm\`)
+3. WinRM配置是否正确 (\`winrm get winrm/config\`)
+4. 检查凭据是否正确
+5. 如果使用域账户，确保Kerberos配置正确
+EOF
+  check_status "创建Windows配置指南"
 }
 
 # 函数: 创建符号链接
@@ -424,11 +783,13 @@ create_symlinks() {
   # 创建bin目录下的便捷命令
   ln -sf $PROJECT_DIR/run.sh /usr/local/bin/ansible-run
   ln -sf $PROJECT_DIR/add_host.sh /usr/local/bin/ansible-add-host
+  ln -sf $PROJECT_DIR/add_win_host.sh /usr/local/bin/ansible-add-win-host
   check_status "创建符号链接"
   
   echo "现在您可以在任何目录使用以下命令:"
   echo "  ansible-run <playbook> [参数]"
   echo "  ansible-add-host <主机组> <主机名> <IP地址> [用户名] [密码]"
+  echo "  ansible-add-win-host <主机组> <主机名> <IP地址> <用户名> [密码]"
 }
 
 # 主函数
@@ -449,9 +810,10 @@ main() {
   echo -e "${YELLOW}日志文件: ${GREEN}$LOG_FILE${NC}"
   echo ""
   echo -e "${GREEN}使用方法:${NC}"
-  echo -e "  ${YELLOW}1. 添加主机:${NC} ansible-add-host webservers web1 192.168.1.101"
-  echo -e "  ${YELLOW}2. 测试连接:${NC} ansible-run ping.yml"
-  echo -e "  ${YELLOW}3. 运行主配置:${NC} ansible-run site.yml"
+  echo -e "  ${YELLOW}1. 添加Linux主机:${NC} ansible-add-host webservers web1 192.168.1.101"
+  echo -e "  ${YELLOW}2. 添加Windows主机:${NC} ansible-add-win-host windows win1 192.168.1.150 Administrator Password"
+  echo -e "  ${YELLOW}3. 测试连接:${NC} ansible-run ping.yml"
+  echo -e "  ${YELLOW}4. 运行主配置:${NC} ansible-run site.yml"
   echo ""
   echo -e "${YELLOW}结束时间: $(date)${NC}"
 }
