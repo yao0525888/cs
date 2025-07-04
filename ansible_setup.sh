@@ -141,7 +141,7 @@ install_ansible_pip() {
   # 安装python3和pip
   if [[ "$DISTRO" == "debian" || "$DISTRO" == "ubuntu" ]]; then
     apt-get update -y
-    apt-get install -y python3 python3-pip
+    apt-get install -y python3 python3-pip python3-venv
   elif [[ "$DISTRO" == "rhel" || "$DISTRO" == "centos" || "$DISTRO" == "fedora" ]]; then
     if [[ "$VERSION" == "7" ]]; then
       yum install -y python3 python3-pip
@@ -153,7 +153,7 @@ install_ansible_pip() {
     # 尝试通用方法
     if command -v apt-get &> /dev/null; then
       apt-get update -y
-      apt-get install -y python3 python3-pip
+      apt-get install -y python3 python3-pip python3-venv
     elif command -v yum &> /dev/null; then
       yum install -y python3 python3-pip
     elif command -v dnf &> /dev/null; then
@@ -165,13 +165,38 @@ install_ansible_pip() {
   fi
   check_status "安装Python和pip"
   
-  # 升级pip
-  python3 -m pip install --upgrade pip
-  check_status "升级pip"
+  # 创建虚拟环境
+  echo -e "${YELLOW}创建Python虚拟环境...${NC}"
+  VENV_DIR="/opt/ansible-venv"
+  python3 -m venv $VENV_DIR
+  check_status "创建虚拟环境"
   
-  # 安装ansible
-  python3 -m pip install ansible
-  check_status "通过pip安装Ansible"
+  # 在虚拟环境中安装Ansible
+  echo -e "${YELLOW}在虚拟环境中安装Ansible...${NC}"
+  $VENV_DIR/bin/pip install --upgrade pip
+  $VENV_DIR/bin/pip install ansible pywinrm jinja2>=3.0
+  check_status "安装Ansible和依赖"
+  
+  # 创建包装脚本
+  echo -e "${YELLOW}创建Ansible包装脚本...${NC}"
+  cat > /usr/local/bin/ansible-wrapper << EOF
+#!/bin/bash
+source $VENV_DIR/bin/activate
+ansible \$@
+EOF
+
+  cat > /usr/local/bin/ansible-playbook-wrapper << EOF
+#!/bin/bash
+source $VENV_DIR/bin/activate
+ansible-playbook \$@
+EOF
+
+  chmod +x /usr/local/bin/ansible-wrapper
+  chmod +x /usr/local/bin/ansible-playbook-wrapper
+  ln -sf /usr/local/bin/ansible-wrapper /usr/local/bin/ansible
+  ln -sf /usr/local/bin/ansible-playbook-wrapper /usr/local/bin/ansible-playbook
+  
+  check_status "创建Ansible包装脚本"
 }
 
 # 函数: 安装Ansible
