@@ -68,40 +68,40 @@ install_frps() {
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ FRP 下载失败！${NC}"
         return 1
-    }
+    fi
     echo -e "${BLUE}» 解压 FRPS 安装包...${NC}"
     if ! tar -zxf "${FRP_FILE}"; then
         echo -e "${RED}✗ FRP 解压失败！${NC}"
         rm -f "${FRP_FILE}"
         return 1
-    }
+    fi
     echo -e "${BLUE}» 安装 FRPS 可执行文件...${NC}"
     cd "${FRP_NAME}" 
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 无法进入 FRP 目录！${NC}"
         return 1
-    }
+    fi
     rm -f frpc*
     mkdir -p /usr/local/frp
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 创建 /usr/local/frp 目录失败！${NC}"
         return 1
-    }
+    fi
     if ! cp frps /usr/local/frp/; then
         echo -e "${RED}✗ 拷贝 frps 可执行文件失败！${NC}"
         return 1
-    }
+    fi
     chmod +x /usr/local/frp/frps
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 设置 frps 可执行权限失败！${NC}"
         return 1
-    }
+    fi
     echo -e "${BLUE}» 创建 FRPS 配置文件...${NC}"
     mkdir -p /etc/frp
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 创建 /etc/frp 目录失败！${NC}"
         return 1
-    }
+    fi
     cat > /etc/frp/frps.toml << EOF
 bindAddr = "0.0.0.0"
 bindPort = ${FRPS_PORT}
@@ -118,7 +118,7 @@ EOF
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 写入 frps.toml 配置文件失败！${NC}"
         return 1
-    }
+    fi
     echo -e "${BLUE}» 创建 FRPS 服务单元...${NC}"
     cat > /etc/systemd/system/frps.service << EOF
 [Unit]
@@ -137,7 +137,7 @@ EOF
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 写入 frps.service 文件失败！${NC}"
         return 1
-    }
+    fi
     echo -e "${BLUE}» 配置防火墙规则...${NC}"
     if command -v ufw >/dev/null 2>&1; then
         ufw allow ${FRPS_PORT}/tcp >/dev/null 2>&1
@@ -153,25 +153,25 @@ EOF
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 重新加载 systemd 配置失败！${NC}"
         return 1
-    }
+    fi
     systemctl enable frps >/dev/null 2>&1
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 启用 frps 服务失败！${NC}"
         return 1
-    }
+    fi
     echo -e "${CYAN}  └─ 启用并启动 FRPS 服务...${NC}"
     systemctl start frps >/dev/null 2>&1
     if [ $? -ne 0 ]; then
         echo -e "${RED}✗ 启动 frps 服务失败！${NC}"
         journalctl -u frps.service --no-pager -n 20
         return 1
-    }
+    fi
     if systemctl is-active frps >/dev/null 2>&1; then
       echo -e "${CYAN}  └─ FRPS 服务已成功启动...${NC}"
     else
         echo -e "${RED}✗ FRPS服务启动失败${NC}"
         return 1
-    }
+    fi
     rm -f /usr/local/${FRP_FILE}
     rm -rf /usr/local/${FRP_NAME}
 }
