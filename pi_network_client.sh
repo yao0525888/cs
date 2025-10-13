@@ -164,8 +164,6 @@ install_softether_and_frps() {
     fi
     
     install_frps
-    
-    echo -e "${SUCCESS}✓ SoftEtherVPN 和 FRPS 安装完成${NC}"
     echo ""
     show_status
     exit 0
