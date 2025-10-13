@@ -127,7 +127,7 @@ show_config() {
     fi
     
     API_KEY=$(grep "^API_KEY=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
-    PORT=$(grep "^PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2 || echo "3000")
+    PORT=$(grep "^PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2 || echo "7008")
     SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
     
     echo "后端服务状态:"
@@ -303,7 +303,7 @@ sleep 3
 if systemctl is-active --quiet pi-network-backend; then
     echo "✓ 后端服务运行正常"
     
-    response=$(curl -s -H "X-API-Key: $API_KEY" http://localhost:3000/api/status 2>/dev/null)
+    response=$(curl -s -H "X-API-Key: $API_KEY" http://localhost:7008/api/status 2>/dev/null)
     if echo "$response" | grep -q "vpn"; then
         echo "✓ API 测试成功"
     else
@@ -318,9 +318,9 @@ fi
 echo ""
 echo ">>> 配置防火墙..."
 if command -v ufw &> /dev/null; then
-    ufw allow 3000/tcp 2>/dev/null && echo "✓ UFW 防火墙已配置"
+    ufw allow 7008/tcp 2>/dev/null && echo "✓ UFW 防火墙已配置"
 elif command -v firewall-cmd &> /dev/null; then
-    firewall-cmd --permanent --add-port=3000/tcp 2>/dev/null
+    firewall-cmd --permanent --add-port=7008/tcp 2>/dev/null
     firewall-cmd --reload 2>/dev/null
     echo "✓ firewalld 防火墙已配置"
 fi
@@ -347,7 +347,7 @@ echo "  重启服务: systemctl restart pi-network-backend"
 echo ""
 echo "客户端使用："
 echo "  export API_KEY='$API_KEY'"
-echo "  export BACKEND_URL='http://${SERVER_IP}:3000'"
+echo "  export BACKEND_URL='http://${SERVER_IP}:7008'"
 echo "  cd $PROJECT_DIR/client"
 echo "  sudo ./pi_network_client.sh"
 echo ""
