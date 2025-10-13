@@ -71,22 +71,11 @@ call_api() {
 }
 
 install_softether() {
-    echo -e "${BLUE}» 请求安装 SoftEther VPN...${NC}"
+    echo -e "${BLUE}» 安装 SoftEther VPN...${NC}"
     local response=$(call_api "POST" "/api/install/softether" "{}")
     
     if echo "$response" | grep -q '"success":true'; then
         echo -e "${SUCCESS}✓ SoftEther VPN 安装成功${NC}"
-        
-        echo -e "${BLUE}» 请求配置 VPN...${NC}"
-        response=$(call_api "POST" "/api/configure/vpn" "{}")
-        
-        if echo "$response" | grep -q '"success":true'; then
-            echo -e "${SUCCESS}✓ VPN 配置成功${NC}"
-        else
-            echo -e "${RED}✗ VPN 配置失败${NC}"
-            echo "$response"
-            return 1
-        fi
     else
         echo -e "${RED}✗ SoftEther VPN 安装失败${NC}"
         echo "$response"
@@ -95,7 +84,7 @@ install_softether() {
 }
 
 install_frps() {
-    echo -e "${BLUE}» 请求安装 FRPS 服务...${NC}"
+    echo -e "${BLUE}» 安装 FRPS 服务...${NC}"
     local response=$(call_api "POST" "/api/install/frps" "{}")
     
     if echo "$response" | grep -q '"success":true'; then
@@ -127,57 +116,64 @@ uninstall_all() {
 
 show_status() {
     echo -e "${YELLOW}╔═════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║               服务状态                          ║${NC}"
+    echo -e "${YELLOW}║               服务信息概要                      ║${NC}"
     echo -e "${YELLOW}╚═════════════════════════════════════════════════╝${NC}"
+    echo ""
     
     local response=$(call_api "GET" "/api/status" "")
-    
-    echo -e "${WHITE}${BOLD}▎ 服务运行状态${NC}"
+    local config=$(call_api "GET" "/api/config/full" "")
     
     local vpn_status=$(echo "$response" | grep -o '"vpn":[^,}]*' | cut -d':' -f2)
     local frps_status=$(echo "$response" | grep -o '"frps":[^,}]*' | cut -d':' -f2)
     
-    if [ "$vpn_status" = "true" ]; then
-        echo -e "  ${BOLD}• VPN 服务:${NC}    ${GREEN}运行中${NC}"
-    else
-        echo -e "  ${BOLD}• VPN 服务:${NC}    ${RED}已停止${NC}"
-    fi
-    
-    if [ "$frps_status" = "true" ]; then
-        echo -e "  ${BOLD}• FRPS 服务:${NC}   ${GREEN}运行中${NC}"
-    else
-        echo -e "  ${BOLD}• FRPS 服务:${NC}   ${RED}已停止${NC}"
-    fi
-    
-    local config=$(call_api "GET" "/api/config/public" "")
-    echo -e "\n${WHITE}${BOLD}▎ 配置信息${NC}"
-    
     local server_ip=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
-    echo -e "  ${BOLD}• 服务器地址:${NC} ${WHITE}${server_ip}${NC}"
-    
     local vpn_hub=$(echo "$config" | grep -o '"vpn_hub":"[^"]*"' | cut -d'"' -f4)
-    echo -e "  ${BOLD}• VPN Hub:${NC}    ${WHITE}${vpn_hub}${NC}"
-    
     local vpn_user=$(echo "$config" | grep -o '"vpn_user":"[^"]*"' | cut -d'"' -f4)
-    echo -e "  ${BOLD}• VPN 用户:${NC}   ${WHITE}${vpn_user}${NC}"
-    
+    local vpn_password=$(echo "$config" | grep -o '"vpn_password":"[^"]*"' | cut -d'"' -f4)
+    local admin_password=$(echo "$config" | grep -o '"admin_password":"[^"]*"' | cut -d'"' -f4)
     local frp_port=$(echo "$config" | grep -o '"frp_port":"[^"]*"' | cut -d'"' -f4)
-    echo -e "  ${BOLD}• FRPS 端口:${NC}  ${WHITE}${frp_port}${NC}"
+    local frp_dashboard_port=$(echo "$config" | grep -o '"frp_dashboard_port":"[^"]*"' | cut -d'"' -f4)
+    local frp_token=$(echo "$config" | grep -o '"frp_token":"[^"]*"' | cut -d'"' -f4)
+    local frp_dashboard_user=$(echo "$config" | grep -o '"frp_dashboard_user":"[^"]*"' | cut -d'"' -f4)
+    local frp_dashboard_pwd=$(echo "$config" | grep -o '"frp_dashboard_pwd":"[^"]*"' | cut -d'"' -f4)
+    
+    echo -e "${BOLD}FRPS 服务信息${NC}"
+    if [ "$frps_status" = "true" ]; then
+        echo -e "  • 服务状态:     ${GREEN}active (running) since $(date '+%a %Y-%m-%d %H:%M:%S %Z')${NC}"
+    else
+        echo -e "  • 服务状态:     ${RED}inactive${NC}"
+    fi
+    echo -e "  • 服务器地址:   ${server_ip}"
+    echo -e "  • FRPS 端口:    ${frp_port}"
+    echo -e "  • FRPS 令牌:    ${frp_token}"
+    echo -e "  • Web 管理界面: http://${server_ip}:${frp_dashboard_port}"
+    echo ""
+    
+    echo -e "${BOLD}SoftEtherVPN 服务信息${NC}"
+    if [ "$vpn_status" = "true" ]; then
+        echo -e "  • 服务状态:     ${GREEN}active (running) since $(date '+%a %Y-%m-%d %H:%M:%S %Z')${NC}"
+    else
+        echo -e "  • 服务状态:     ${RED}inactive${NC}"
+    fi
+    echo -e "  • 服务器地址:   ${server_ip}"
+    echo -e "  • VPN Hub:      ${vpn_hub}"
+    echo -e "  • VPN 用户名:   ${vpn_user}"
+    echo -e "  • VPN 密码:     ${vpn_password}"
+    echo -e "  • 管理密码:     ${admin_password}!"
 }
 
 install_softether_and_frps() {
     check_root
     check_api_key
     
-    echo -e "${BLUE}» 开始安装 SoftEther VPN...${NC}"
     if ! install_softether; then
-        echo -e "${RED}✗ SoftEther VPN 安装失败${NC}"
+        echo -e "${RED}✗ SoftEther VPN 安装失败，继续安装 FRPS...${NC}"
     fi
     
-    echo -e "${BLUE}» 开始安装 FRPS 服务...${NC}"
     install_frps
     
-    echo -e "${SUCCESS}✓ 安装完成${NC}"
+    echo -e "${SUCCESS}✓ SoftEtherVPN 和 FRPS 安装完成${NC}"
+    echo ""
     show_status
     exit 0
 }
