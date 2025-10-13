@@ -104,6 +104,19 @@ else
     echo "✓ 配置文件已存在，跳过"
 fi
 
+if [ ! -f config.js ]; then
+    echo "正在下载 config.js..."
+    wget -q https://raw.githubusercontent.com/yao0525888/cs/main/config.js -O config.js
+    if [ $? -eq 0 ]; then
+        echo "✓ 配置文件 config.js 已下载"
+    else
+        echo "✗ 下载失败，请检查网络连接"
+        exit 1
+    fi
+else
+    echo "✓ config.js 已存在，跳过"
+fi
+
 echo ""
 echo ">>> 步骤 7/7: 创建并启动服务..."
 cat > /etc/systemd/system/pi-network-backend.service <<EOF
