@@ -142,7 +142,6 @@ show_status() {
     echo -e "  • 服务器地址:   ${server_ip}"
     echo -e "  • FRPS 端口:    ${frp_port}"
     echo -e "  • FRPS 令牌:    ${frp_token}"
-    echo -e "  • Web 管理界面: http://${server_ip}:${frp_dashboard_port}"
     echo ""
     
     echo -e "${BOLD}SoftEtherVPN 服务信息${NC}"
@@ -152,10 +151,8 @@ show_status() {
         echo -e "  • 服务状态:     ${RED}inactive${NC}"
     fi
     echo -e "  • 服务器地址:   ${server_ip}"
-    echo -e "  • VPN Hub:      ${vpn_hub}"
     echo -e "  • VPN 用户名:   ${vpn_user}"
     echo -e "  • VPN 密码:     ${vpn_password}"
-    echo -e "  • 管理密码:     ${admin_password}!"
 }
 
 install_softether_and_frps() {
