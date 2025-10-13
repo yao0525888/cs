@@ -2,7 +2,7 @@ module.exports = {
     admin_password: process.env.ADMIN_PASSWORD || "Qaz123456!",
     vpn_hub: process.env.VPN_HUB || "DEFAULT",
     vpn_user: process.env.VPN_USER || "pi",
-    vpn_password: process.env.VPN_PASSWORD || "8888888888!",
+    vpn_password: process.env.VPN_PASSWORD || "esdrftgyhuji",
     dhcp: {
         start: process.env.DHCP_START || "192.168.30.10",
         end: process.env.DHCP_END || "192.168.30.20",
@@ -20,4 +20,5 @@ module.exports = {
         dashboard_pwd: process.env.FRPS_DASHBOARD_PWD || "yao581581"
     }
 };
+
 
