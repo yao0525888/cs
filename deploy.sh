@@ -2,13 +2,166 @@
 
 set -e
 
-echo "========================================="
-echo "  Pi Network 后端一键安装脚本"
-echo "========================================="
-echo ""
+PROJECT_DIR="/opt/pi-network"
+
+show_menu() {
+    clear
+    echo "========================================="
+    echo "  Pi Network 后端管理"
+    echo "========================================="
+    echo ""
+    echo "请选择操作："
+    echo "  1) 安装后端服务"
+    echo "  2) 修改 API Key"
+    echo "  3) 查看当前配置"
+    echo "  4) 退出"
+    echo ""
+    echo -n "请输入选项 [1-4]: "
+    read -r choice
+    
+    case "$choice" in
+        1) install_backend ;;
+        2) change_api_key ;;
+        3) show_config ;;
+        4) echo "退出"; exit 0 ;;
+        *) echo "无效选项"; sleep 2; show_menu ;;
+    esac
+}
+
+change_api_key() {
+    clear
+    echo "========================================="
+    echo "  修改 API Key"
+    echo "========================================="
+    echo ""
+    
+    if [ ! -f "$PROJECT_DIR/backend/.env" ]; then
+        echo "✗ 后端服务未安装"
+        echo "请先安装后端服务"
+        sleep 3
+        show_menu
+        return
+    fi
+    
+    echo "当前 API Key:"
+    OLD_API_KEY=$(grep "^API_KEY=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    echo "$OLD_API_KEY"
+    echo ""
+    echo "选择操作："
+    echo "  1) 生成新的随机 API Key"
+    echo "  2) 手动输入新的 API Key"
+    echo "  3) 返回主菜单"
+    echo ""
+    echo -n "请输入选项 [1-3]: "
+    read -r api_choice
+    
+    case "$api_choice" in
+        1)
+            NEW_API_KEY=$(openssl rand -hex 32)
+            echo ""
+            echo "新的 API Key: $NEW_API_KEY"
+            ;;
+        2)
+            echo ""
+            echo -n "请输入新的 API Key: "
+            read -r NEW_API_KEY
+            if [ -z "$NEW_API_KEY" ]; then
+                echo "✗ API Key 不能为空"
+                sleep 2
+                change_api_key
+                return
+            fi
+            ;;
+        3)
+            show_menu
+            return
+            ;;
+        *)
+            echo "无效选项"
+            sleep 2
+            change_api_key
+            return
+            ;;
+    esac
+    
+    echo ""
+    echo -n "确认修改 API Key？(y/n): "
+    read -r confirm
+    
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        sed -i "s/^API_KEY=.*/API_KEY=$NEW_API_KEY/" $PROJECT_DIR/backend/.env
+        echo "$NEW_API_KEY" > /root/pi-network-api-key.txt
+        
+        systemctl restart pi-network-backend
+        
+        echo ""
+        echo "✓ API Key 已更新"
+        echo "✓ 后端服务已重启"
+        echo "✓ API Key 已保存到: /root/pi-network-api-key.txt"
+        echo ""
+        echo "新的 API Key: $NEW_API_KEY"
+        echo ""
+        echo "请更新客户端脚本中的 API_KEY 变量"
+    else
+        echo "已取消"
+    fi
+    
+    echo ""
+    echo -n "按回车键继续..."
+    read
+    show_menu
+}
+
+show_config() {
+    clear
+    echo "========================================="
+    echo "  当前配置信息"
+    echo "========================================="
+    echo ""
+    
+    if [ ! -f "$PROJECT_DIR/backend/.env" ]; then
+        echo "✗ 后端服务未安装"
+        sleep 3
+        show_menu
+        return
+    fi
+    
+    API_KEY=$(grep "^API_KEY=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    PORT=$(grep "^PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2 || echo "3000")
+    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    
+    echo "后端服务状态:"
+    if systemctl is-active --quiet pi-network-backend; then
+        echo "  ✓ 运行中"
+    else
+        echo "  ✗ 已停止"
+    fi
+    echo ""
+    echo "配置信息:"
+    echo "  后端地址: http://${SERVER_IP}:${PORT}"
+    echo "  API Key: $API_KEY"
+    echo "  项目目录: $PROJECT_DIR"
+    echo ""
+    echo "常用命令："
+    echo "  查看状态: systemctl status pi-network-backend"
+    echo "  查看日志: journalctl -u pi-network-backend -f"
+    echo "  重启服务: systemctl restart pi-network-backend"
+    echo ""
+    
+    echo -n "按回车键继续..."
+    read
+    show_menu
+}
+
+install_backend() {
+    clear
+    echo "========================================="
+    echo "  Pi Network 后端一键安装"
+    echo "========================================="
+    echo ""
 
 if [ "$EUID" -ne 0 ]; then 
-    echo "请使用 root 权限运行: bash install.sh"
+    echo "请使用 root 权限运行"
     exit 1
 fi
 
@@ -199,3 +352,14 @@ echo "  cd $PROJECT_DIR/client"
 echo "  sudo ./pi_network_client.sh"
 echo ""
 
+echo -n "按回车键返回主菜单..."
+read
+show_menu
+}
+
+if [ "$EUID" -ne 0 ]; then 
+    echo "请使用 root 权限运行"
+    exit 1
+fi
+
+show_menu
