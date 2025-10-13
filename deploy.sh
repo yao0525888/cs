@@ -47,7 +47,8 @@ done
 
 echo ""
 echo ">>> 步骤 3/7: 解压文件..."
-tar -xzf pi-network-backend.tar.gz
+mkdir -p pi-network
+tar -xzf pi-network-backend.tar.gz -C pi-network
 if [ $? -ne 0 ]; then
     echo "✗ 解压失败"
     exit 1
@@ -68,16 +69,15 @@ fi
 echo ""
 echo ">>> 步骤 5/7: 复制文件到项目目录..."
 mkdir -p $PROJECT_DIR
-if [ -d "$TEMP_DIR/pi-network" ]; then
+if [ -d "$TEMP_DIR/pi-network/backend" ]; then
     cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
-elif [ -d "$TEMP_DIR/Pi Network 前后端分离架构" ]; then
-    cp -r "$TEMP_DIR/Pi Network 前后端分离架构/"* $PROJECT_DIR/
+    echo "✓ 文件已复制到 $PROJECT_DIR"
 else
     echo "✗ 找不到项目文件"
     ls -la $TEMP_DIR
+    ls -la $TEMP_DIR/pi-network 2>/dev/null || true
     exit 1
 fi
-echo "✓ 文件已复制到 $PROJECT_DIR"
 
 echo ""
 echo ">>> 步骤 6/7: 安装依赖并配置..."
