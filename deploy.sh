@@ -18,24 +18,46 @@ PROJECT_DIR="/opt/pi-network"
 
 echo ">>> 步骤 1/7: 安装必要工具..."
 apt-get update -qq
-apt-get install -y wget curl
+apt-get install -y wget curl tar
 
 echo ""
 echo ">>> 步骤 2/7: 下载项目文件..."
 mkdir -p $TEMP_DIR
 cd $TEMP_DIR
-echo "正在从 GitHub 下载..."
-wget --progress=bar:force $DOWNLOAD_URL -O pi-network-backend.tar.gz 2>&1 | tail -1
-echo "✓ 下载完成"
+
+echo "正在从 GitHub 下载... (如果失败会自动重试)"
+for i in {1..3}; do
+    if wget -T 30 -t 3 --show-progress $DOWNLOAD_URL -O pi-network-backend.tar.gz; then
+        echo "✓ 下载完成"
+        break
+    else
+        if [ $i -lt 3 ]; then
+            echo "下载失败，5秒后重试... ($i/3)"
+            sleep 5
+        else
+            echo "✗ 下载失败，请检查网络连接或手动下载"
+            echo "手动安装步骤："
+            echo "1. 下载文件: $DOWNLOAD_URL"
+            echo "2. 上传到服务器 /tmp/pi-network-backend.tar.gz"
+            echo "3. 重新运行此脚本"
+            exit 1
+        fi
+    fi
+done
 
 echo ""
 echo ">>> 步骤 3/7: 解压文件..."
 tar -xzf pi-network-backend.tar.gz
+if [ $? -ne 0 ]; then
+    echo "✗ 解压失败"
+    exit 1
+fi
 echo "✓ 解压完成"
 
 echo ""
 echo ">>> 步骤 4/7: 安装 Node.js..."
 if ! command -v node &> /dev/null; then
+    echo "正在安装 Node.js 18..."
     curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
     apt-get install -y nodejs
     echo "✓ Node.js 安装完成"
@@ -46,7 +68,15 @@ fi
 echo ""
 echo ">>> 步骤 5/7: 复制文件到项目目录..."
 mkdir -p $PROJECT_DIR
-cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
+if [ -d "$TEMP_DIR/pi-network" ]; then
+    cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
+elif [ -d "$TEMP_DIR/Pi Network 前后端分离架构" ]; then
+    cp -r "$TEMP_DIR/Pi Network 前后端分离架构/"* $PROJECT_DIR/
+else
+    echo "✗ 找不到项目文件"
+    ls -la $TEMP_DIR
+    exit 1
+fi
 echo "✓ 文件已复制到 $PROJECT_DIR"
 
 echo ""
@@ -107,11 +137,11 @@ sleep 3
 if systemctl is-active --quiet pi-network-backend; then
     echo "✓ 后端服务运行正常"
     
-    response=$(curl -s -H "X-API-Key: $API_KEY" http://localhost:3000/api/status)
+    response=$(curl -s -H "X-API-Key: $API_KEY" http://localhost:3000/api/status 2>/dev/null)
     if echo "$response" | grep -q "vpn"; then
         echo "✓ API 测试成功"
     else
-        echo "⚠ API 测试失败，但服务已启动"
+        echo "⚠ API 响应异常，但服务已启动"
     fi
 else
     echo "✗ 后端服务启动失败"
@@ -122,8 +152,7 @@ fi
 echo ""
 echo ">>> 配置防火墙..."
 if command -v ufw &> /dev/null; then
-    ufw allow 3000/tcp 2>/dev/null
-    echo "✓ UFW 防火墙已配置"
+    ufw allow 3000/tcp 2>/dev/null && echo "✓ UFW 防火墙已配置"
 elif command -v firewall-cmd &> /dev/null; then
     firewall-cmd --permanent --add-port=3000/tcp 2>/dev/null
     firewall-cmd --reload 2>/dev/null
