@@ -14,16 +14,18 @@ show_menu() {
     echo "  1) 安装后端服务"
     echo "  2) 修改 API Key"
     echo "  3) 查看当前配置"
-    echo "  4) 退出"
+    echo "  4) 卸载后端服务"
+    echo "  5) 退出"
     echo ""
-    echo -n "请输入选项 [1-4]: "
+    echo -n "请输入选项 [1-5]: "
     read -r choice
     
     case "$choice" in
         1) install_backend ;;
         2) change_api_key ;;
         3) show_config ;;
-        4) echo "退出"; exit 0 ;;
+        4) uninstall_backend ;;
+        5) echo "退出"; exit 0 ;;
         *) echo "无效选项"; sleep 2; show_menu ;;
     esac
 }
@@ -47,42 +49,13 @@ change_api_key() {
     OLD_API_KEY=$(grep "^API_KEY=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
     echo "$OLD_API_KEY"
     echo ""
-    echo "选择操作："
-    echo "  1) 生成新的随机 API Key"
-    echo "  2) 手动输入新的 API Key"
-    echo "  3) 返回主菜单"
-    echo ""
-    echo -n "请输入选项 [1-3]: "
-    read -r api_choice
+    echo -n "请输入新的 API Key (直接回车生成随机): "
+    read -r NEW_API_KEY
     
-    case "$api_choice" in
-        1)
-            NEW_API_KEY=$(openssl rand -hex 32)
-            echo ""
-            echo "新的 API Key: $NEW_API_KEY"
-            ;;
-        2)
-            echo ""
-            echo -n "请输入新的 API Key: "
-            read -r NEW_API_KEY
-            if [ -z "$NEW_API_KEY" ]; then
-                echo "✗ API Key 不能为空"
-                sleep 2
-                change_api_key
-                return
-            fi
-            ;;
-        3)
-            show_menu
-            return
-            ;;
-        *)
-            echo "无效选项"
-            sleep 2
-            change_api_key
-            return
-            ;;
-    esac
+    if [ -z "$NEW_API_KEY" ]; then
+        NEW_API_KEY=$(openssl rand -hex 32)
+        echo "已生成随机 API Key: $NEW_API_KEY"
+    fi
     
     echo ""
     echo -n "确认修改 API Key？(y/n): "
@@ -102,6 +75,70 @@ change_api_key() {
         echo "新的 API Key: $NEW_API_KEY"
         echo ""
         echo "请更新客户端脚本中的 API_KEY 变量"
+    else
+        echo "已取消"
+    fi
+    
+    echo ""
+    echo -n "按回车键继续..."
+    read
+    show_menu
+}
+
+uninstall_backend() {
+    clear
+    echo "========================================="
+    echo "  卸载后端服务"
+    echo "========================================="
+    echo ""
+    
+    if [ ! -f "$PROJECT_DIR/backend/.env" ]; then
+        echo "✗ 后端服务未安装"
+        sleep 3
+        show_menu
+        return
+    fi
+    
+    echo "警告: 此操作将删除以下内容："
+    echo "  • 后端服务"
+    echo "  • 项目文件 ($PROJECT_DIR)"
+    echo "  • systemd 服务配置"
+    echo ""
+    echo -n "确认卸载？(y/n): "
+    read -r confirm
+    
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        echo ""
+        echo ">>> 停止服务..."
+        systemctl stop pi-network-backend 2>/dev/null
+        systemctl disable pi-network-backend 2>/dev/null
+        echo "✓ 服务已停止"
+        
+        echo ""
+        echo ">>> 删除服务配置..."
+        rm -f /etc/systemd/system/pi-network-backend.service
+        systemctl daemon-reload
+        echo "✓ 服务配置已删除"
+        
+        echo ""
+        echo ">>> 删除项目文件..."
+        rm -rf $PROJECT_DIR
+        echo "✓ 项目文件已删除"
+        
+        echo ""
+        echo ">>> 清理防火墙规则..."
+        if command -v ufw &> /dev/null; then
+            ufw delete allow 7008/tcp 2>/dev/null && echo "✓ UFW 规则已删除"
+        elif command -v firewall-cmd &> /dev/null; then
+            firewall-cmd --permanent --remove-port=7008/tcp 2>/dev/null
+            firewall-cmd --reload 2>/dev/null
+            echo "✓ firewalld 规则已删除"
+        fi
+        
+        echo ""
+        echo "✓ 卸载完成"
+        echo ""
+        echo "注意: API Key 备份文件保留在 /root/pi-network-api-key.txt"
     else
         echo "已取消"
     fi
@@ -337,7 +374,7 @@ echo "========================================="
 echo "  部署完成！"
 echo "========================================="
 echo ""
-echo "后端地址: http://${SERVER_IP}:3000"
+echo "后端地址: http://${SERVER_IP}:7008"
 echo "API Key: $API_KEY"
 echo ""
 echo "常用命令："
