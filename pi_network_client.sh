@@ -97,10 +97,8 @@ install_frps() {
 }
 
 uninstall_all() {
-    echo -e "${YELLOW}╔═════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║               卸载所有服务                      ║${NC}"
-    echo -e "${YELLOW}╚═════════════════════════════════════════════════╝${NC}"
-    
+    echo -e "${YELLOW}卸载所有服务${NC}"
+    echo ""
     echo -e "${BLUE}» 请求卸载所有服务...${NC}"
     local response=$(call_api "POST" "/api/uninstall/all" "{}")
     
@@ -115,9 +113,7 @@ uninstall_all() {
 }
 
 show_status() {
-    echo -e "${YELLOW}╔═════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║               服务信息概要                      ║${NC}"
-    echo -e "${YELLOW}╚═════════════════════════════════════════════════╝${NC}"
+    echo -e "${YELLOW}服务信息概要${NC}"
     echo ""
     
     local response=$(call_api "GET" "/api/status" "")
@@ -179,16 +175,14 @@ install_softether_and_frps() {
 }
 
 show_menu() {
-    echo -e "${YELLOW}╔═════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║               Pi Network 管理面板              ║${NC}"
-    echo -e "${YELLOW}║               (客户端版本)                     ║${NC}"
-    echo -e "${YELLOW}╚═════════════════════════════════════════════════╝${NC}"
+    echo -e "${YELLOW}Pi Network 管理面板（客户端版本）${NC}"
+    echo ""
     echo -e "${LIGHT_GREEN}请选择要执行的操作:${NC}"
     echo -e "  ${BLUE}1)${NC} 安装 SoftEtherVPN 和 FRPS 服务"
     echo -e "  ${BLUE}2)${NC} 卸载所有服务" 
     echo -e "  ${BLUE}3)${NC} 查看服务状态"
     echo -e "  ${BLUE}4)${NC} 退出脚本"
-    echo -e "${YELLOW}═════════════════════════════════════════════════${NC}"
+    echo ""
     echo -n "请输入选项 [1-4]: "
     read -r choice
     case "$choice" in
