@@ -3,12 +3,12 @@
 set -e
 
 echo "========================================="
-echo "  Pi Network 后端一键部署脚本"
+echo "  Pi Network 后端一键安装脚本"
 echo "========================================="
 echo ""
 
 if [ "$EUID" -ne 0 ]; then 
-    echo "请使用 root 权限运行: sudo bash deploy.sh"
+    echo "请使用 root 权限运行: sudo bash install.sh"
     exit 1
 fi
 
@@ -155,3 +155,4 @@ echo "  export BACKEND_URL='http://$(curl -s ifconfig.me):3000'"
 echo "  cd $PROJECT_DIR/client"
 echo "  sudo ./pi_network_client.sh"
 echo ""
+
