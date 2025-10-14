@@ -217,16 +217,32 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+echo ">>> 检查并卸载已存在的服务..."
+if systemctl is-active --quiet pi-network-backend 2>/dev/null; then
+    echo "发现已安装的后端服务，正在卸载..."
+    systemctl stop pi-network-backend 2>/dev/null
+    systemctl disable pi-network-backend 2>/dev/null
+    rm -f /etc/systemd/system/pi-network-backend.service
+    systemctl daemon-reload
+    echo "✓ 旧服务已卸载"
+fi
+
+if [ -d "$PROJECT_DIR" ]; then
+    echo "发现已存在的项目目录，正在清理..."
+    rm -rf $PROJECT_DIR
+    echo "✓ 旧项目文件已清理"
+fi
+
 DOWNLOAD_URL="https://github.com/yao0525888/hysteria/releases/download/v1/pi-network-backend.tar.gz"
 TEMP_DIR="/tmp/pi-network-install"
 PROJECT_DIR="/opt/pi-network"
 
-echo ">>> 步骤 1/7: 安装必要工具..."
+echo ">>> 步骤 1/8: 安装必要工具..."
 apt-get update -qq
 apt-get install -y wget curl tar swaks
 
 echo ""
-echo ">>> 步骤 2/7: 下载项目文件..."
+echo ">>> 步骤 2/8: 下载项目文件..."
 mkdir -p $TEMP_DIR
 cd $TEMP_DIR
 
@@ -251,7 +267,7 @@ for i in {1..3}; do
 done
 
 echo ""
-echo ">>> 步骤 3/7: 解压文件..."
+echo ">>> 步骤 3/8: 解压文件..."
 mkdir -p pi-network
 tar -xzf pi-network-backend.tar.gz -C pi-network
 if [ $? -ne 0 ]; then
@@ -261,7 +277,7 @@ fi
 echo "✓ 解压完成"
 
 echo ""
-echo ">>> 步骤 4/7: 安装 Node.js..."
+echo ">>> 步骤 4/8: 安装 Node.js..."
 if ! command -v node &> /dev/null; then
     echo "正在安装 Node.js 18..."
     curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
@@ -272,7 +288,7 @@ else
 fi
 
 echo ""
-echo ">>> 步骤 5/7: 复制文件到项目目录..."
+echo ">>> 步骤 5/8: 复制文件到项目目录..."
 mkdir -p $PROJECT_DIR
 if [ -d "$TEMP_DIR/pi-network/backend" ]; then
     cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
@@ -285,7 +301,7 @@ else
 fi
 
 echo ""
-echo ">>> 步骤 6/7: 安装依赖并配置..."
+echo ">>> 步骤 6/8: 安装依赖并配置..."
 cd $PROJECT_DIR/backend
 npm install --production
 
@@ -317,7 +333,7 @@ fi
 
 
 echo ""
-echo ">>> 步骤 7/7: 创建并启动服务..."
+echo ">>> 步骤 7/8: 创建并启动服务..."
 cat > /etc/systemd/system/pi-network-backend.service <<EOF
 [Unit]
 Description=Pi Network Backend API
@@ -343,7 +359,7 @@ systemctl restart pi-network-backend
 echo "✓ 系统服务已创建并启动"
 
 echo ""
-echo ">>> 验证部署..."
+echo ">>> 步骤 8/8: 验证部署..."
 sleep 3
 
 if systemctl is-active --quiet pi-network-backend; then
