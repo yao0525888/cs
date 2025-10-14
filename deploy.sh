@@ -202,7 +202,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-DOWNLOAD_URL="https://github.com/yao0525888/hysteria/releases/download/v1/pi-network-backend.tar.gz"
+DOWNLOAD_URL="https://github.com/yao0525888/cs/releases/download/v1/pi-network-backend.tar.gz"
 TEMP_DIR="/tmp/pi-network-install"
 PROJECT_DIR="/opt/pi-network"
 
@@ -237,8 +237,7 @@ done
 
 echo ""
 echo ">>> 步骤 3/7: 解压文件..."
-mkdir -p pi-network
-tar -xzf pi-network-backend.tar.gz -C pi-network
+tar -xzf pi-network-backend.tar.gz
 if [ $? -ne 0 ]; then
     echo "✗ 解压失败"
     exit 1
@@ -259,13 +258,12 @@ fi
 echo ""
 echo ">>> 步骤 5/7: 复制文件到项目目录..."
 mkdir -p $PROJECT_DIR
-if [ -d "$TEMP_DIR/pi-network/backend" ]; then
-    cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
+if [ -d "$TEMP_DIR/backend" ]; then
+    cp -r $TEMP_DIR/backend $PROJECT_DIR/
     echo "✓ 文件已复制到 $PROJECT_DIR"
 else
     echo "✗ 找不到项目文件"
     ls -la $TEMP_DIR
-    ls -la $TEMP_DIR/pi-network 2>/dev/null || true
     exit 1
 fi
 
@@ -275,9 +273,9 @@ cd $PROJECT_DIR/backend
 npm install --production
 
 if [ ! -f .env ]; then
-    API_KEY=$(openssl rand -hex 32)
+    API_KEY="a1c4afca2909a69d69aa0708f737d6f3c8a2b60c6c620c3b60869360234bcd34"
     cp env.example .env
-    sed -i "s/your-secure-api-key-here-change-this/$API_KEY/" .env
+    sed -i "s/a1c4afca2909a69d69aa0708f737d6f3c8a2b60c6c620c3b60869360234bcd34/$API_KEY/" .env
     
     echo "✓ 配置文件已生成"
     echo ""
@@ -294,18 +292,7 @@ else
     echo "✓ 配置文件已存在，跳过"
 fi
 
-if [ ! -f config.js ]; then
-    echo "正在下载 config.js..."
-    wget -q https://raw.githubusercontent.com/yao0525888/cs/main/config.js -O config.js
-    if [ $? -eq 0 ]; then
-        echo "✓ 配置文件 config.js 已下载"
-    else
-        echo "✗ 下载失败，请检查网络连接"
-        exit 1
-    fi
-else
-    echo "✓ config.js 已存在，跳过"
-fi
+echo "✓ 使用环境变量配置系统"
 
 echo ""
 echo ">>> 步骤 7/7: 创建并启动服务..."
