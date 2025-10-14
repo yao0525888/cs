@@ -164,7 +164,13 @@ show_config() {
     fi
     
     API_KEY=$(grep "^API_KEY=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
-    PORT=$(grep "^PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2 || echo "7008")
+    PORT=$(grep "^PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    VPN_HUB=$(grep "^VPN_HUB=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    VPN_USER=$(grep "^VPN_USER=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    FRP_VERSION=$(grep "^FRP_VERSION=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    FRPS_PORT=$(grep "^FRPS_PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    ENABLE_LIMIT=$(grep "^ENABLE_LIMIT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    
     SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
     
     echo "后端服务状态:"
@@ -178,6 +184,15 @@ show_config() {
     echo "  后端地址: http://${SERVER_IP}:${PORT}"
     echo "  API Key: $API_KEY"
     echo "  项目目录: $PROJECT_DIR"
+    echo ""
+    echo "VPN 配置:"
+    echo "  VPN Hub: $VPN_HUB"
+    echo "  VPN 用户: $VPN_USER"
+    echo "  限速开关: $ENABLE_LIMIT"
+    echo ""
+    echo "FRP 配置:"
+    echo "  FRP 版本: $FRP_VERSION"
+    echo "  FRP 端口: $FRPS_PORT"
     echo ""
     echo "常用命令："
     echo "  查看状态: systemctl status pi-network-backend"
@@ -237,7 +252,8 @@ done
 
 echo ""
 echo ">>> 步骤 3/7: 解压文件..."
-tar -xzf pi-network-backend.tar.gz
+mkdir -p pi-network
+tar -xzf pi-network-backend.tar.gz -C pi-network
 if [ $? -ne 0 ]; then
     echo "✗ 解压失败"
     exit 1
@@ -258,12 +274,13 @@ fi
 echo ""
 echo ">>> 步骤 5/7: 复制文件到项目目录..."
 mkdir -p $PROJECT_DIR
-if [ -d "$TEMP_DIR/backend" ]; then
-    cp -r $TEMP_DIR/backend $PROJECT_DIR/
+if [ -d "$TEMP_DIR/pi-network/backend" ]; then
+    cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
     echo "✓ 文件已复制到 $PROJECT_DIR"
 else
     echo "✗ 找不到项目文件"
     ls -la $TEMP_DIR
+    ls -la $TEMP_DIR/pi-network 2>/dev/null || true
     exit 1
 fi
 
@@ -273,9 +290,15 @@ cd $PROJECT_DIR/backend
 npm install --production
 
 if [ ! -f .env ]; then
-    API_KEY="a1c4afca2909a69d69aa0708f737d6f3c8a2b60c6c620c3b60869360234bcd34"
+    DEFAULT_API_KEY=$(grep "^API_KEY=" env.example | cut -d'=' -f2)
+    if [ -z "$DEFAULT_API_KEY" ]; then
+        API_KEY=$(openssl rand -hex 32)
+    else
+        API_KEY="$DEFAULT_API_KEY"
+    fi
+    
     cp env.example .env
-    sed -i "s/a1c4afca2909a69d69aa0708f737d6f3c8a2b60c6c620c3b60869360234bcd34/$API_KEY/" .env
+    sed -i "s/^API_KEY=.*/API_KEY=$API_KEY/" .env
     
     echo "✓ 配置文件已生成"
     echo ""
@@ -292,7 +315,6 @@ else
     echo "✓ 配置文件已存在，跳过"
 fi
 
-echo "✓ 使用环境变量配置系统"
 
 echo ""
 echo ">>> 步骤 7/7: 创建并启动服务..."
