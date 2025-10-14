@@ -223,7 +223,7 @@ PROJECT_DIR="/opt/pi-network"
 
 echo ">>> 步骤 1/7: 安装必要工具..."
 apt-get update -qq
-apt-get install -y wget curl tar
+apt-get install -y wget curl tar swaks
 
 echo ""
 echo ">>> 步骤 2/7: 下载项目文件..."
