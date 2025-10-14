@@ -202,7 +202,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-DOWNLOAD_URL="https://github.com/yao0525888/cs/releases/download/v1/pi-network-backend.tar.gz"
+DOWNLOAD_URL="https://github.com/yao0525888/hysteria/releases/download/v1/pi-network-backend.tar.gz"
 TEMP_DIR="/tmp/pi-network-install"
 PROJECT_DIR="/opt/pi-network"
 
