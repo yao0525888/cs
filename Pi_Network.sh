@@ -94,7 +94,13 @@ install_all_services() {
         return 1
     fi
     
-    show_hysteria2_config
+    echo -e "${SUCCESS}✓ 安装 Hysteria 2 成功${NC}"
+    echo ""
+    echo -e "${YELLOW}分享链接:${NC}"
+    local url=$(show_hysteria2_config)
+    if [ -n "$url" ]; then
+        echo -e "${LIGHT_GREEN}${url}${NC}"
+    fi
 }
 
 uninstall_xray_frps() {
