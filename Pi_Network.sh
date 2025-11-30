@@ -67,46 +67,260 @@ call_api() {
     fi
 }
 
-install_softether() {
-    echo -e "${BLUE}» 安装 SoftEther VPN...${NC}"
-    local response=$(call_api "POST" "/api/install/softether" "{}")
+
+install_xray_frps() {
+    echo -e "${BLUE}» 安装 Xray + FRPS...${NC}"
+    local response=$(call_api "POST" "/api/install/xray-frps" "{}")
     
     if echo "$response" | grep -q '"success":true'; then
-        echo -e "${SUCCESS}✓ SoftEther VPN 安装成功${NC}"
+        echo -e "${SUCCESS}✓ Xray + FRPS 安装成功${NC}"
     else
-        echo -e "${RED}✗ SoftEther VPN 安装失败${NC}"
+        echo -e "${RED}✗ Xray + FRPS 安装失败${NC}"
         echo "$response"
         return 1
     fi
 }
 
-install_frps() {
-    echo -e "${BLUE}» 安装 FRPS 服务...${NC}"
-    local response=$(call_api "POST" "/api/install/frps" "{}")
-    
-    if echo "$response" | grep -q '"success":true'; then
-        echo -e "${SUCCESS}✓ FRPS 安装成功${NC}"
-    else
-        echo -e "${RED}✗ FRPS 安装失败${NC}"
-        echo "$response"
-        return 1
-    fi
-}
-
-uninstall_all() {
-    echo -e "${YELLOW}卸载所有服务${NC}"
+uninstall_xray_frps() {
+    echo -e "${YELLOW}卸载 Xray + FRPS${NC}"
     echo ""
-    echo -e "${BLUE}» 请求卸载所有服务...${NC}"
-    local response=$(call_api "POST" "/api/uninstall/all" "{}")
+    echo -e "${BLUE}» 请求卸载 Xray + FRPS...${NC}"
+    local response=$(call_api "POST" "/api/uninstall/xray-frps" "{}")
     
     if echo "$response" | grep -q '"success":true'; then
-        echo -e "${SUCCESS}✓ 所有服务已成功卸载${NC}"
+        echo -e "${SUCCESS}✓ Xray + FRPS 已成功卸载${NC}"
     else
         echo -e "${RED}✗ 卸载失败${NC}"
         echo "$response"
         return 1
     fi
     sleep 2
+}
+
+change_xray_port() {
+    echo -e "${YELLOW}修改 Xray 端口${NC}"
+    echo ""
+    echo -n "请输入新的端口号 (1-65535): "
+    read -r new_port
+    
+    if [[ ! $new_port =~ ^[0-9]+$ ]] || [[ $new_port -lt 1 ]] || [[ $new_port -gt 65535 ]]; then
+        echo -e "${RED}✗ 端口号无效，请输入1-65535之间的数字${NC}"
+        sleep 2
+        return 1
+    fi
+    
+    echo -e "${BLUE}» 请求修改端口...${NC}"
+    local response=$(call_api "POST" "/api/xray/change-port" "{\"port\": $new_port}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Xray 端口已修改为: $new_port${NC}"
+    else
+        echo -e "${RED}✗ 修改端口失败${NC}"
+        echo "$response"
+        return 1
+    fi
+    sleep 2
+}
+
+change_xray_protocol() {
+    echo -e "${YELLOW}修改 Xray 协议${NC}"
+    echo ""
+    echo "请选择协议类型："
+    echo "  1) tcp"
+    echo "  2) ws"
+    echo "  3) grpc"
+    echo -n "请输入选项 [1-3]: "
+    read -r proto_choice
+    
+    case $proto_choice in
+        1) protocol="tcp" ;;
+        2) protocol="ws" ;;
+        3) protocol="grpc" ;;
+        *)
+            echo -e "${RED}✗ 无效选择${NC}"
+            sleep 2
+            return 1
+            ;;
+    esac
+    
+    echo -e "${BLUE}» 请求修改协议...${NC}"
+    local response=$(call_api "POST" "/api/xray/change-protocol" "{\"protocol\": \"$protocol\"}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Xray 协议已修改为: $protocol${NC}"
+    else
+        echo -e "${RED}✗ 修改协议失败${NC}"
+        echo "$response"
+        return 1
+    fi
+    sleep 2
+}
+
+show_xray_link() {
+    echo -e "${YELLOW}Xray Reality 分享链接${NC}"
+    echo ""
+    
+    local response=$(call_api "GET" "/api/xray/link" "")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        local link=$(echo "$response" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
+        if [ -n "$link" ]; then
+            echo -e "${BOLD}分享链接:${NC}"
+            echo -e "${GREEN}${link}${NC}"
+        else
+            echo -e "${RED}✗ 获取链接失败${NC}"
+        fi
+    else
+        echo -e "${RED}✗ 获取链接失败${NC}"
+        echo "$response"
+    fi
+}
+
+install_hysteria2() {
+    echo -e "${BLUE}» 安装 Hysteria 2...${NC}"
+    local response=$(call_api "POST" "/api/install/hysteria2" "{}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Hysteria 2 安装成功${NC}"
+    else
+        echo -e "${RED}✗ Hysteria 2 安装失败${NC}"
+        echo "$response"
+        return 1
+    fi
+}
+
+uninstall_hysteria2() {
+    echo -e "${YELLOW}卸载 Hysteria 2${NC}"
+    echo ""
+    echo -e "${BLUE}» 请求卸载 Hysteria 2...${NC}"
+    local response=$(call_api "POST" "/api/uninstall/hysteria2" "{}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Hysteria 2 已成功卸载${NC}"
+    else
+        echo -e "${RED}✗ 卸载失败${NC}"
+        echo "$response"
+        return 1
+    fi
+    sleep 2
+}
+
+start_hysteria2() {
+    echo -e "${BLUE}» 启动 Hysteria 2...${NC}"
+    local response=$(call_api "POST" "/api/hysteria2/start" "{}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Hysteria 2 已启动${NC}"
+    else
+        echo -e "${RED}✗ 启动失败${NC}"
+        echo "$response"
+        return 1
+    fi
+}
+
+stop_hysteria2() {
+    echo -e "${BLUE}» 停止 Hysteria 2...${NC}"
+    local response=$(call_api "POST" "/api/hysteria2/stop" "{}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Hysteria 2 已停止${NC}"
+    else
+        echo -e "${RED}✗ 停止失败${NC}"
+        echo "$response"
+        return 1
+    fi
+}
+
+restart_hysteria2() {
+    echo -e "${BLUE}» 重启 Hysteria 2...${NC}"
+    local response=$(call_api "POST" "/api/hysteria2/restart" "{}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ Hysteria 2 已重启${NC}"
+    else
+        echo -e "${RED}✗ 重启失败${NC}"
+        echo "$response"
+        return 1
+    fi
+}
+
+change_hysteria2_port() {
+    echo -e "${YELLOW}修改 Hysteria 2 端口${NC}"
+    echo ""
+    echo -n "请输入新的端口号 (1-65535): "
+    read -r new_port
+    
+    if [[ ! $new_port =~ ^[0-9]+$ ]] || [[ $new_port -lt 1 ]] || [[ $new_port -gt 65535 ]]; then
+        echo -e "${RED}✗ 端口号无效，请输入1-65535之间的数字${NC}"
+        sleep 2
+        return 1
+    fi
+    
+    echo -e "${BLUE}» 请求修改端口...${NC}"
+    local response=$(call_api "POST" "/api/hysteria2/change-port" "{\"port\": $new_port}")
+    
+    if echo "$response" | grep -q '"success":true'; then
+        echo -e "${SUCCESS}✓ 端口已修改为: $new_port${NC}"
+        echo -e "${YELLOW}请重启 Hysteria 2 服务使其生效${NC}"
+    else
+        echo -e "${RED}✗ 修改端口失败${NC}"
+        echo "$response"
+        return 1
+    fi
+    sleep 2
+}
+
+show_hysteria2_config() {
+    echo -e "${YELLOW}Hysteria 2 配置文件${NC}"
+    echo ""
+    
+    local hysteria_config=$(call_api "GET" "/api/hysteria2/config" "")
+    
+    # 提取 URL
+    local url=$(echo "$hysteria_config" | grep -o '"url":"[^"]*"' | cut -d'"' -f4)
+    
+    # 提取 YAML 配置
+    local yaml=$(echo "$hysteria_config" | sed -n 's/.*"yaml":"\([^"]*\)".*/\1/p' | sed 's/\\n/\n/g' 2>/dev/null || echo "")
+    
+    if [ -z "$yaml" ]; then
+        yaml=$(echo "$hysteria_config" | grep -o '"yaml":"[^"]*"' | cut -d'"' -f4 | sed 's/\\n/\n/g' 2>/dev/null || echo "")
+    fi
+    
+    if [ -n "$yaml" ] && [ "$yaml" != "null" ]; then
+        echo -e "${BOLD}YAML 配置文件:${NC}"
+        echo "$yaml"
+        echo ""
+    fi
+    
+    if [ -n "$url" ] && [ "$url" != "null" ]; then
+        echo -e "${BOLD}分享链接:${NC}"
+        echo -e "${RED}${url}${NC}"
+    fi
+    
+    if [ -z "$url" ] || [ "$url" = "null" ]; then
+        echo -e "${YELLOW}配置文件不存在或未安装${NC}"
+    fi
+}
+
+hysteria2_service_menu() {
+    clear
+    echo "#############################################################"
+    echo -e "#                  ${GREEN}Hysteria 2 服务控制${NC}                     #"
+    echo "#############################################################"
+    echo ""
+    echo -e " ${GREEN}1.${NC} 启动 Hysteria 2"
+    echo -e " ${GREEN}2.${NC} 停止 Hysteria 2"
+    echo -e " ${GREEN}3.${NC} 重启 Hysteria 2"
+    echo -e " ${GREEN}0.${NC} 返回主菜单"
+    echo ""
+    read -rp "请输入选项 [0-3]: " switchInput
+    case $switchInput in
+        1) start_hysteria2; sleep 2 ;;
+        2) stop_hysteria2; sleep 2 ;;
+        3) restart_hysteria2; sleep 2 ;;
+        0) ;;
+        *) echo -e "${RED}无效选项${NC}"; sleep 2 ;;
+    esac
 }
 
 show_status() {
@@ -116,67 +330,57 @@ show_status() {
     local response=$(call_api "GET" "/api/status" "")
     local config=$(call_api "GET" "/api/config/full" "")
     
-    local vpn_status=$(echo "$response" | grep -o '"vpn":[^,}]*' | cut -d':' -f2)
-    local frps_status=$(echo "$response" | grep -o '"frps":[^,}]*' | cut -d':' -f2)
+    local xray_status=$(echo "$response" | grep -o '"xray":[^,}]*' | cut -d':' -f2)
+    local hysteria2_status=$(echo "$response" | grep -o '"hysteria2":[^,}]*' | cut -d':' -f2 | tr -d ' ')
     
     local server_ip=$(curl -s ifconfig.me || hostname -I | awk '{print $1}')
-    local vpn_hub=$(echo "$config" | grep -o '"vpn_hub":"[^"]*"' | cut -d'"' -f4)
-    local vpn_user=$(echo "$config" | grep -o '"vpn_user":"[^"]*"' | cut -d'"' -f4)
-    local vpn_password=$(echo "$config" | grep -o '"vpn_password":"[^"]*"' | cut -d'"' -f4)
-    local admin_password=$(echo "$config" | grep -o '"admin_password":"[^"]*"' | cut -d'"' -f4)
-    local frp_port=$(echo "$config" | grep -o '"frp_port":"[^"]*"' | cut -d'"' -f4)
-    local frp_dashboard_port=$(echo "$config" | grep -o '"frp_dashboard_port":"[^"]*"' | cut -d'"' -f4)
-    local frp_token=$(echo "$config" | grep -o '"frp_token":"[^"]*"' | cut -d'"' -f4)
-    local frp_dashboard_user=$(echo "$config" | grep -o '"frp_dashboard_user":"[^"]*"' | cut -d'"' -f4)
-    local frp_dashboard_pwd=$(echo "$config" | grep -o '"frp_dashboard_pwd":"[^"]*"' | cut -d'"' -f4)
+    local hysteria_port=$(echo "$config" | grep -o '"hysteria_port":"[^"]*"' | cut -d'"' -f4)
+    local hysteria_password=$(echo "$config" | grep -o '"hysteria_password":"[^"]*"' | cut -d'"' -f4)
+    local masquerade_host=$(echo "$config" | grep -o '"hysteria_masquerade_host":"[^"]*"' | cut -d'"' -f4)
     
     echo -e "  • 服务器地址:   ${server_ip}"
     echo ""
     
-    echo -e "${BOLD}FRPS 服务信息${NC}"
-    if [ "$frps_status" = "true" ]; then
+    echo -e "${BOLD}Xray 服务信息${NC}"
+    if [ "$xray_status" = "true" ]; then
         echo -e "  • 服务状态:     ${GREEN}active (running) since $(date '+%a %Y-%m-%d %H:%M:%S %Z')${NC}"
     else
         echo -e "  • 服务状态:     ${RED}inactive${NC}"
     fi
-    echo -e "  • FRPS 端口:    ${frp_port}"
-    echo -e "  • FRPS 密钥:    ${frp_token}"
     echo ""
     
-    echo -e "${BOLD}SoftEtherVPN 服务信息${NC}"
-    if [ "$vpn_status" = "true" ]; then
+    echo -e "${BOLD}Hysteria 2 服务信息${NC}"
+    if [ "$hysteria2_status" = "true" ]; then
         echo -e "  • 服务状态:     ${GREEN}active (running) since $(date '+%a %Y-%m-%d %H:%M:%S %Z')${NC}"
     else
         echo -e "  • 服务状态:     ${RED}inactive${NC}"
     fi
-    echo -e "  • VPN 用户名:   ${vpn_user}"
-    echo -e "  • VPN 密码:     ${vpn_password}"
+    if [ -n "$hysteria_port" ]; then
+        echo -e "  • Hysteria 端口: ${hysteria_port}"
+        echo -e "  • Hysteria 密码: ${hysteria_password}"
+        echo -e "  • 伪装网站:      ${masquerade_host}"
+    fi
 }
 
-install_softether_and_frps() {
-    check_root
-    check_api_key
-    
-    if ! install_softether; then
-        echo -e "${RED}✗ SoftEther VPN 安装失败，继续安装 FRPS...${NC}"
-    fi
-    
-    install_frps
-    echo ""
-    show_status
-    exit 0
-}
 
 show_menu() {
     echo -e "${YELLOW}Pi Network 管理面板（客户端版本）${NC}"
     echo ""
     echo -e "${LIGHT_GREEN}请选择要执行的操作:${NC}"
-    echo -e "  ${BLUE}1)${NC} 安装 SoftEtherVPN 和 FRPS 服务"
-    echo -e "  ${BLUE}2)${NC} 卸载所有服务" 
-    echo -e "  ${BLUE}3)${NC} 查看服务状态"
-    echo -e "  ${BLUE}4)${NC} 退出脚本"
+    echo -e "  ${BLUE}1)${NC} 安装 Xray + FRPS 服务"
+    echo -e "  ${BLUE}2)${NC} 安装 Hysteria 2 服务"
+    echo -e "  ${BLUE}3)${NC} 卸载 Xray + FRPS"
+    echo -e "  ${BLUE}4)${NC} 卸载 Hysteria 2"
+    echo -e "  ${BLUE}5)${NC} 查看服务状态"
+    echo -e "  ${BLUE}6)${NC} 修改 Xray 端口"
+    echo -e "  ${BLUE}7)${NC} 修改 Xray 协议"
+    echo -e "  ${BLUE}8)${NC} 查看 Xray 分享链接"
+    echo -e "  ${BLUE}9)${NC} Hysteria 2 服务控制（启动/停止/重启）"
+    echo -e "  ${BLUE}10)${NC} 修改 Hysteria 2 端口"
+    echo -e "  ${BLUE}11)${NC} 查看 Hysteria 2 配置"
+    echo -e "  ${BLUE}0)${NC} 退出脚本"
     echo ""
-    echo -n "请输入选项 [1-4]: "
+    echo -n "请输入选项 [0-11]: "
     read -t 3 -r choice
     if [ -z "$choice" ]; then
         choice="1"
@@ -186,25 +390,72 @@ show_menu() {
         1)
             check_root
             check_api_key
-            install_softether_and_frps
+            install_xray_frps
+            echo ""
+            show_xray_link
+            echo ""
+            read -p "按回车键继续..."
             ;;
         2)
             check_root
             check_api_key
-            uninstall_all
+            install_hysteria2
+            echo ""
+            show_hysteria2_config
+            echo ""
+            read -p "按回车键继续..."
             ;;
         3)
+            check_root
+            check_api_key
+            uninstall_xray_frps
+            ;;
+        4)
+            check_root
+            check_api_key
+            uninstall_hysteria2
+            ;;
+        5)
             check_api_key
             show_status
             echo ""
             read -p "按回车键继续..."
             ;;
-        4)
+        6)
+            check_api_key
+            change_xray_port
+            ;;
+        7)
+            check_api_key
+            change_xray_protocol
+            ;;
+        8)
+            check_api_key
+            show_xray_link
+            echo ""
+            read -p "按回车键继续..."
+            ;;
+        9)
+            check_api_key
+            hysteria2_service_menu
+            ;;
+        10)
+            check_api_key
+            change_hysteria2_port
+            ;;
+        11)
+            check_api_key
+            show_hysteria2_config
+            echo ""
+            read -p "按回车键继续..."
+            ;;
+        0)
             echo -e "${GREEN}退出脚本。${NC}"
             exit 0
             ;;
         *)
-            echo -e "${RED}无效选项，请输入 1-4 之间的数字。${NC}"
+            echo -e "${RED}无效选项，请输入 0-11 之间的数字。${NC}"
+            sleep 2
             ;;
     esac
 }
