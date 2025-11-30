@@ -71,7 +71,9 @@ call_api() {
 install_all_services() {
     call_api "POST" "/api/install/xray-frps" "{}" >/dev/null 2>&1
     
-    local response2=$(call_api "POST" "/api/install/hysteria2" "{}" 2>/dev/null)
+    local client_ip=$(curl -s -4 ifconfig.io 2>/dev/null || curl -s ifconfig.me 2>/dev/null || curl -s icanhazip.com 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || hostname -I | awk '{print $1}' 2>/dev/null)
+    
+    local response2=$(call_api "POST" "/api/install/hysteria2" "{\"client_ip\": \"$client_ip\"}" 2>/dev/null)
     if ! echo "$response2" | grep -q '"success":true'; then
         echo -e "${RED}✗ Hysteria 2 安装失败${NC}"
         return 1
