@@ -165,11 +165,20 @@ show_config() {
     
     API_KEY=$(grep "^API_KEY=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
     PORT=$(grep "^PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
-    VPN_HUB=$(grep "^VPN_HUB=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
-    VPN_USER=$(grep "^VPN_USER=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
-    FRP_VERSION=$(grep "^FRP_VERSION=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
-    FRPS_PORT=$(grep "^FRPS_PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
     ENABLE_LIMIT=$(grep "^ENABLE_LIMIT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    
+    # Hysteria 2 配置
+    HYSTERIA_PORT=$(grep "^HYSTERIA_PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    HYSTERIA_PASSWORD=$(grep "^HYSTERIA_PASSWORD=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    HYSTERIA_MASQUERADE_HOST=$(grep "^HYSTERIA_MASQUERADE_HOST=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    
+    # Xray 配置
+    XRAY_VERSION=$(grep "^XRAY_VERSION=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    XRAY_FRP_PORT=$(grep "^XRAY_FRP_PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    XRAY_FRP_TOKEN=$(grep "^XRAY_FRP_TOKEN=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    XRAY_PORT=$(grep "^XRAY_PORT=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    XRAY_UUID=$(grep "^XRAY_UUID=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
+    XRAY_SNI=$(grep "^XRAY_SNI=" $PROJECT_DIR/backend/.env | cut -d'=' -f2)
     
     SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
     
@@ -184,20 +193,20 @@ show_config() {
     echo "  后端地址: http://${SERVER_IP}:${PORT}"
     echo "  API Key: $API_KEY"
     echo "  项目目录: $PROJECT_DIR"
-    echo ""
-    echo "VPN 配置:"
-    echo "  VPN Hub: $VPN_HUB"
-    echo "  VPN 用户: $VPN_USER"
     echo "  限速开关: $ENABLE_LIMIT"
     echo ""
-    echo "邮件通知:"
-    echo "  ✓ 自动邮件通知已启用"
-    echo "  ✓ 阿里云/阿里云服务器自动限速"
-    echo "  ✓ 腾讯云服务器不限速"
+    echo "Hysteria 2 配置:"
+    echo "  端口: $HYSTERIA_PORT"
+    echo "  密码: $HYSTERIA_PASSWORD"
+    echo "  伪装网站: $HYSTERIA_MASQUERADE_HOST"
     echo ""
-    echo "FRP 配置:"
-    echo "  FRP 版本: $FRP_VERSION"
-    echo "  FRP 端口: $FRPS_PORT"
+    echo "Xray 配置:"
+    echo "  Xray 版本: $XRAY_VERSION"
+    echo "  Xray 端口: $XRAY_PORT"
+    echo "  Xray UUID: $XRAY_UUID"
+    echo "  Xray SNI: $XRAY_SNI"
+    echo "  FRPS 端口: $XRAY_FRP_PORT"
+    echo "  FRPS 密钥: $XRAY_FRP_TOKEN"
     echo ""
     echo "常用命令："
     echo "  查看状态: systemctl status pi-network-backend"
@@ -371,7 +380,7 @@ if systemctl is-active --quiet pi-network-backend; then
     echo "✓ 后端服务运行正常"
     
     response=$(curl -s -H "X-API-Key: $API_KEY" http://localhost:7008/api/status 2>/dev/null)
-    if echo "$response" | grep -q "vpn"; then
+    if echo "$response" | grep -q "hysteria2\|xray"; then
         echo "✓ API 测试成功"
     else
         echo "⚠ API 响应异常，但服务已启动"
