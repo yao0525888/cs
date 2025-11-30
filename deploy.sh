@@ -199,10 +199,6 @@ show_config() {
     echo "  FRP 版本: $FRP_VERSION"
     echo "  FRP 端口: $FRPS_PORT"
     echo ""
-    echo "脚本文件:"
-    echo "  ✓ configure_vpn.sh - VPN 配置脚本"
-    echo "  ✓ maintenance.sh - 维护脚本"
-    echo ""
     echo "常用命令："
     echo "  查看状态: systemctl status pi-network-backend"
     echo "  查看日志: journalctl -u pi-network-backend -f"
@@ -302,11 +298,6 @@ mkdir -p $PROJECT_DIR
 if [ -d "$TEMP_DIR/pi-network/backend" ]; then
     cp -r $TEMP_DIR/pi-network/* $PROJECT_DIR/
     echo "✓ 文件已复制到 $PROJECT_DIR"
-    
-    # 设置脚本执行权限
-    chmod +x $PROJECT_DIR/backend/configure_vpn.sh 2>/dev/null || true
-    chmod +x $PROJECT_DIR/backend/maintenance.sh 2>/dev/null || true
-    echo "✓ 脚本权限已设置"
 else
     echo "✗ 找不到项目文件"
     ls -la $TEMP_DIR
