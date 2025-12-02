@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# 3x-ui 一键安装脚本（Debian/Ubuntu）
-# 默认：面板端口 7010，用户名/密码：admin
 
 set -e
 
@@ -9,7 +7,6 @@ USERNAME="admin"
 PASSWORD="admin"
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh"
 
-# 必须 root 运行
 if [ "$(id -u)" -ne 0 ]; then
   echo "请使用 root 用户运行此脚本：sudo bash $0"
   exit 1
@@ -28,19 +25,18 @@ echo "更新软件源并安装依赖 curl socat..."
 apt update -y
 apt install -y curl socat
 
-echo "下载并执行 3x-ui 官方安装脚本..."
-bash <(curl -Ls "$INSTALL_SCRIPT_URL")
+echo "下载并执行 3x-ui 官方安装脚本（自动回答端口问题为 $PANEL_PORT）..."
+printf "y\n%s\n" "$PANEL_PORT" | bash <(curl -Ls "$INSTALL_SCRIPT_URL")
 
 echo "尝试设置面板端口、用户名和密码..."
 
-# 常见可执行文件路径（不同版本可能略有差异）
 BIN_CANDIDATES=(
   "3x-ui"
   "/usr/local/3x-ui/3x-ui"
   "/usr/bin/3x-ui"
   "/usr/local/x-ui/x-ui"
   "x-ui"
-)
+) 
 
 SET_OK=0
 for bin in "${BIN_CANDIDATES[@]}"; do
@@ -59,9 +55,10 @@ if command -v ufw >/dev/null 2>&1; then
   ufw allow "${PANEL_PORT}"/tcp || true
 fi
 
-echo "==== 安装流程结束 ===="
-echo "如无意外，请访问：  http://<你的服务器IP>:$PANEL_PORT"
+echo "==== 安装成功 ===="
+SERVER_IP=$(curl -4s https://api.ipify.org || curl -4s https://ifconfig.me || echo "<你的公网IP>")
+
+echo "面板地址：http://$SERVER_IP:$PANEL_PORT"
 echo "用户名：$USERNAME"
 echo "密  码：$PASSWORD"
-
 
