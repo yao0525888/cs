@@ -43,7 +43,7 @@ install_panel() {
   for bin in "${BIN_CANDIDATES[@]}"; do
     if command -v "$bin" >/dev/null 2>&1 || [ -x "$bin" ]; then
       echo "使用可执行文件：$bin"
-      "$bin" setting -port "$PANEL_PORT" -username "$USERNAME" -password "$PASSWORD" >/dev/null 2>&1 && SET_OK=1 && break
+      "$bin" setting -port "$PANEL_PORT" -username "$USERNAME" -password "$PASSWORD" -webPath / >/dev/null 2>&1 && SET_OK=1 && break
     fi
   done
 
