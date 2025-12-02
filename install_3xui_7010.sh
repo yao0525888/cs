@@ -57,22 +57,15 @@ install_panel() {
   "$XUI_BIN" setting -port "$PANEL_PORT" 2>&1 || true
 
   echo "设置用户名和密码..."
-  "$XUI_BIN" setting -username "$USERNAME" -password "$PASSWORD" 2>&1 || true
-
+  SET_PASS_RESULT=$("$XUI_BIN" setting -username "$USERNAME" -password "$PASSWORD" 2>&1)
+  echo "$SET_PASS_RESULT"
+  
   DB_FILE="/etc/x-ui/x-ui.db"
   if [ ! -f "$DB_FILE" ]; then
     DB_FILE="/usr/local/x-ui/bin/x-ui.db"
   fi
   if [ ! -f "$DB_FILE" ]; then
     DB_FILE="/usr/local/3x-ui/bin/x-ui.db"
-  fi
-
-  if [ -f "$DB_FILE" ] && command -v sqlite3 >/dev/null 2>&1; then
-    echo "通过数据库直接设置用户名和密码..."
-    PASSWORD_HASH=$(echo -n "$PASSWORD" | sha256sum | awk '{print $1}')
-    sqlite3 "$DB_FILE" "UPDATE users SET username = '$USERNAME', password = '$PASSWORD_HASH' WHERE id = 1;" 2>/dev/null || \
-    sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO users (id, username, password) VALUES (1, '$USERNAME', '$PASSWORD_HASH');" 2>/dev/null || \
-    sqlite3 "$DB_FILE" "UPDATE setting SET value = '$USERNAME' WHERE key = 'username'; UPDATE setting SET value = '$PASSWORD_HASH' WHERE key = 'password';" 2>/dev/null || true
   fi
 
   echo "设置面板路径为根目录（固定路径）..."
@@ -148,8 +141,9 @@ reset_account() {
   NEW_PASSWORD="admin"
   echo "重置为：用户名=admin, 密码=admin"
 
-  echo "尝试通过命令行设置..."
-  "$XUI_BIN" setting -username "$NEW_USERNAME" -password "$NEW_PASSWORD" 2>&1 || true
+  echo "通过命令行设置账号密码..."
+  SET_RESULT=$("$XUI_BIN" setting -username "$NEW_USERNAME" -password "$NEW_PASSWORD" 2>&1)
+  echo "$SET_RESULT"
 
   DB_FILE="/etc/x-ui/x-ui.db"
   if [ ! -f "$DB_FILE" ]; then
@@ -166,13 +160,7 @@ reset_account() {
     fi
     
     if command -v sqlite3 >/dev/null 2>&1; then
-      echo "通过数据库直接重置账号密码..."
-      PASSWORD_HASH=$(echo -n "$NEW_PASSWORD" | sha256sum | awk '{print $1}')
-      sqlite3 "$DB_FILE" "UPDATE users SET username = '$NEW_USERNAME', password = '$PASSWORD_HASH' WHERE id = 1;" 2>/dev/null || \
-      sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO users (id, username, password) VALUES (1, '$NEW_USERNAME', '$PASSWORD_HASH');" 2>/dev/null || \
-      sqlite3 "$DB_FILE" "UPDATE setting SET value = '$NEW_USERNAME' WHERE key = 'username'; UPDATE setting SET value = '$PASSWORD_HASH' WHERE key = 'password';" 2>/dev/null || true
-      
-      echo "同时设置面板路径为根目录..."
+      echo "设置面板路径为根目录..."
       sqlite3 "$DB_FILE" "UPDATE setting SET value = '/' WHERE key = 'webBasePath';" 2>/dev/null || \
       sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO setting (key, value) VALUES ('webBasePath', '/');" 2>/dev/null || true
     fi
@@ -205,7 +193,7 @@ uninstall_panel() {
   fi
 }
 
-echo "====== 3x-ui 管理脚本1 ======"
+echo "====== 3x-ui 管理脚本0 ======"
 echo "1) 安装面板"
 echo "2) 卸载面板"
 echo "3) 重置账号密码"
