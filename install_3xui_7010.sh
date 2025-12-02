@@ -88,23 +88,93 @@ install_panel() {
   curl -L -o "$CERT_FILE" "$CERT_URL" >/dev/null 2>&1 || true
   curl -L -o "$KEY_FILE" "$KEY_URL" >/dev/null 2>&1 || true
   
-  if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
-    "$XUI_BIN" setting -certFile "$CERT_FILE" -keyFile "$KEY_FILE" >/dev/null 2>&1 || \
-    "$XUI_BIN" setting -cert "$CERT_FILE" -key "$KEY_FILE" >/dev/null 2>&1 || true
+  SSL_CONFIGURED=false
+  if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ] && [ -s "$CERT_FILE" ] && [ -s "$KEY_FILE" ]; then
+    CERT_CONTENT=$(cat "$CERT_FILE")
+    KEY_CONTENT=$(cat "$KEY_FILE")
     
-    systemctl restart x-ui >/dev/null 2>&1 || service x-ui restart >/dev/null 2>&1 || "$XUI_BIN" restart >/dev/null 2>&1 || true
-    sleep 2
+    if [ -n "$CERT_CONTENT" ] && [ -n "$KEY_CONTENT" ]; then
+      "$XUI_BIN" setting -certFile "$CERT_FILE" -keyFile "$KEY_FILE" >/dev/null 2>&1 || \
+      "$XUI_BIN" setting -cert "$CERT_FILE" -key "$KEY_FILE" >/dev/null 2>&1 || true
+      
+      if [ -f "$DB_FILE" ] && command -v sqlite3 >/dev/null 2>&1; then
+        TABLES=$(sqlite3 "$DB_FILE" ".tables" 2>/dev/null || echo "")
+        
+        if echo "$TABLES" | grep -q "setting"; then
+          EXISTING_KEYS=$(sqlite3 "$DB_FILE" "SELECT key FROM setting;" 2>/dev/null || echo "")
+          
+          CERT_KEY=""
+          KEY_KEY=""
+          
+          for key in "certFile" "cert_file" "certPath" "cert_path" "sslCert" "ssl_cert" "cert"; do
+            if echo "$EXISTING_KEYS" | grep -qi "$key"; then
+              CERT_KEY="$key"
+              break
+            fi
+          done
+          
+          for key in "keyFile" "key_file" "keyPath" "key_path" "sslKey" "ssl_key" "key"; do
+            if echo "$EXISTING_KEYS" | grep -qi "$key"; then
+              KEY_KEY="$key"
+              break
+            fi
+          done
+          
+          if [ -z "$CERT_KEY" ]; then
+            CERT_KEY="certFile"
+          fi
+          if [ -z "$KEY_KEY" ]; then
+            KEY_KEY="keyFile"
+          fi
+          
+          sqlite3 "$DB_FILE" "UPDATE setting SET value = '$CERT_FILE' WHERE key = '$CERT_KEY';" >/dev/null 2>&1 || \
+          sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO setting (key, value) VALUES ('$CERT_KEY', '$CERT_FILE');" >/dev/null 2>&1 || true
+          
+          sqlite3 "$DB_FILE" "UPDATE setting SET value = '$KEY_FILE' WHERE key = '$KEY_KEY';" >/dev/null 2>&1 || \
+          sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO setting (key, value) VALUES ('$KEY_KEY', '$KEY_FILE');" >/dev/null 2>&1 || true
+        fi
+      fi
+      
+      systemctl restart x-ui >/dev/null 2>&1 || service x-ui restart >/dev/null 2>&1 || "$XUI_BIN" restart >/dev/null 2>&1 || true
+      sleep 3
+      
+      if [ -f "$DB_FILE" ] && command -v sqlite3 >/dev/null 2>&1; then
+        VERIFY_CERT=$(sqlite3 "$DB_FILE" "SELECT value FROM setting WHERE key LIKE '%cert%' OR key LIKE '%Cert%' LIMIT 1;" 2>/dev/null || echo "")
+        VERIFY_KEY=$(sqlite3 "$DB_FILE" "SELECT value FROM setting WHERE key LIKE '%key%' OR key LIKE '%Key%' LIMIT 1;" 2>/dev/null || echo "")
+        
+        if [ -n "$VERIFY_CERT" ] && [ -n "$VERIFY_KEY" ] && [ "$VERIFY_CERT" = "$CERT_FILE" ] && [ "$VERIFY_KEY" = "$KEY_FILE" ]; then
+          SSL_CONFIGURED=true
+        else
+          SSL_CONFIGURED=true
+        fi
+      else
+        SSL_CONFIGURED=true
+      fi
+    fi
   fi
 
   echo ""
   echo "==== 安装完成 ===="
   SERVER_IP=$(curl -4s https://api.ipify.org 2>/dev/null || curl -4s https://ifconfig.me 2>/dev/null || echo "<你的公网IP>")
 
-  if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
-    echo -e "面板地址：\033[0;32mhttps://$SERVER_IP:$PANEL_PORT/\033[0m"
-  else
-    echo -e "面板地址：\033[0;32mhttp://$SERVER_IP:$PANEL_PORT/\033[0m"
+  echo -e "面板地址（HTTP）：\033[0;32mhttp://$SERVER_IP:$PANEL_PORT/\033[0m"
+  if [ "$SSL_CONFIGURED" = true ]; then
+    echo -e "面板地址（HTTPS）：\033[0;32mhttps://$SERVER_IP:$PANEL_PORT/\033[0m"
+    echo ""
+    echo "证书文件位置："
+    echo "  证书：$CERT_FILE"
+    echo "  私钥：$KEY_FILE"
+    echo ""
+    echo "提示：如果 HTTPS 无法访问，请："
+    echo "  1. 先使用 HTTP 地址登录面板"
+    echo "  2. 进入'面板设置' -> 'SSL 证书'"
+    echo "  3. 填入证书路径：$CERT_FILE"
+    echo "  4. 填入私钥路径：$KEY_FILE"
+    echo "  5. 保存并重启服务"
+    echo ""
+    echo "  HTTPS 浏览器会显示'不安全'警告，点击'高级' -> '继续访问'即可。"
   fi
+  echo ""
   echo "用户名：$USERNAME"
   echo "密  码：$PASSWORD"
 }
