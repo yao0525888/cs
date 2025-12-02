@@ -205,7 +205,7 @@ uninstall_panel() {
   fi
 }
 
-echo "====== 3x-ui 管理脚本 ======"
+echo "====== 3x-ui 管理脚本1 ======"
 echo "1) 安装面板"
 echo "2) 卸载面板"
 echo "3) 重置账号密码"
