@@ -248,6 +248,31 @@ EOF
         IPTABLES_CMD="/usr/sbin/iptables"
     fi
     
+    if [[ -z "$IPTABLES_CMD" ]]; then
+        yellow "正在尝试安装 iptables..."
+        if command -v apt-get &> /dev/null; then
+            apt-get update >/dev/null 2>&1
+            apt-get install -y iptables >/dev/null 2>&1
+        elif command -v yum &> /dev/null; then
+            yum install -y iptables >/dev/null 2>&1
+        elif command -v dnf &> /dev/null; then
+            dnf install -y iptables >/dev/null 2>&1
+        elif command -v pacman &> /dev/null; then
+            pacman -S --noconfirm iptables >/dev/null 2>&1
+        fi
+        
+        if command -v iptables &> /dev/null; then
+            IPTABLES_CMD=$(command -v iptables)
+            green "✅ iptables 安装成功"
+        elif [ -f /sbin/iptables ]; then
+            IPTABLES_CMD="/sbin/iptables"
+            green "✅ iptables 安装成功"
+        elif [ -f /usr/sbin/iptables ]; then
+            IPTABLES_CMD="/usr/sbin/iptables"
+            green "✅ iptables 安装成功"
+        fi
+    fi
+    
     if [[ -n "$INTERFACE" ]] && [[ -n "$IPTABLES_CMD" ]]; then
         for port in {7012..7050}; do
             $IPTABLES_CMD -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
@@ -555,7 +580,7 @@ service_menu() {
 menu() {
     clear
     echo "#############################################################"
-    echo -e "#                 ${GREEN}Hysteria 2 一键配置脚本1${PLAIN}                  #"
+    echo -e "#                 ${GREEN}Hysteria 2 一键配置脚本2${PLAIN}                  #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
