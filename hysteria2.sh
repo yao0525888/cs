@@ -4,7 +4,6 @@ RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
 PLAIN="\033[0m"
-# 与当前 Windows config.yaml 保持一致：监听 7011，并启用 7011-7050 端口跳跃
 HYSTERIA_PORT=7011
 MASQUERADE_HOST=www.bing.com
 HY_PASSWORD=9e264d67-fe47-4d2f-b55e-631a12e46a30
@@ -91,47 +90,7 @@ install_hy2() {
     chmod 644 /etc/hysteria/cert.crt /etc/hysteria/private.key
 
     cat << EOF > /etc/hysteria/config.yaml
-listen:
-  - :7011
-  - :7012
-  - :7013
-  - :7014
-  - :7015
-  - :7016
-  - :7017
-  - :7018
-  - :7019
-  - :7020
-  - :7021
-  - :7022
-  - :7023
-  - :7024
-  - :7025
-  - :7026
-  - :7027
-  - :7028
-  - :7029
-  - :7030
-  - :7031
-  - :7032
-  - :7033
-  - :7034
-  - :7035
-  - :7036
-  - :7037
-  - :7038
-  - :7039
-  - :7040
-  - :7041
-  - :7042
-  - :7043
-  - :7044
-  - :7045
-  - :7046
-  - :7047
-  - :7048
-  - :7049
-  - :7050
+listen: :$HYSTERIA_PORT
 
 tls:
   cert: /etc/hysteria/cert.crt
@@ -142,51 +101,6 @@ quic:
   maxStreamReceiveWindow: 16777216
   initConnReceiveWindow: 33554432
   maxConnReceiveWindow: 33554432
-
-port-hopping:
-  enabled: true
-  ports:
-    - 7011
-    - 7012
-    - 7013
-    - 7014
-    - 7015
-    - 7016
-    - 7017
-    - 7018
-    - 7019
-    - 7020
-    - 7021
-    - 7022
-    - 7023
-    - 7024
-    - 7025
-    - 7026
-    - 7027
-    - 7028
-    - 7029
-    - 7030
-    - 7031
-    - 7032
-    - 7033
-    - 7034
-    - 7035
-    - 7036
-    - 7037
-    - 7038
-    - 7039
-    - 7040
-    - 7041
-    - 7042
-    - 7043
-    - 7044
-    - 7045
-    - 7046
-    - 7047
-    - 7048
-    - 7049
-    - 7050
-  interval: 20
 
 obfs:
   type: salamander
@@ -215,7 +129,7 @@ EOF
     node_name=$(get_ip_region "$ip")
 
     cat << EOF > /root/hy/hy-client.yaml
-server: $last_ip:$HYSTERIA_PORT
+server: $last_ip:7011-7050
 
 auth:
   type: password
@@ -236,64 +150,20 @@ quic:
   initConnReceiveWindow: 33554432
   maxConnReceiveWindow: 33554432
 
-port-hopping:
-  enabled: true
-  ports:
-    - 7011
-    - 7012
-    - 7013
-    - 7014
-    - 7015
-    - 7016
-    - 7017
-    - 7018
-    - 7019
-    - 7020
-    - 7021
-    - 7022
-    - 7023
-    - 7024
-    - 7025
-    - 7026
-    - 7027
-    - 7028
-    - 7029
-    - 7030
-    - 7031
-    - 7032
-    - 7033
-    - 7034
-    - 7035
-    - 7036
-    - 7037
-    - 7038
-    - 7039
-    - 7040
-    - 7041
-    - 7042
-    - 7043
-    - 7044
-    - 7045
-    - 7046
-    - 7047
-    - 7048
-    - 7049
-    - 7050
-  interval: 20
-
 fastOpen: true
 
 socks5:
   listen: 127.0.0.1:5678
 
 transport:
+  type: udp
   udp:
-    hopInterval: 30s 
+    hopInterval: 20s
 EOF
 
     cat << EOF > /root/hy/hy-client.json
 {
-  "server": "$last_ip:$HYSTERIA_PORT",
+  "server": "$last_ip:7011-7050",
   "auth": {
     "type": "password",
     "password": "$HY_PASSWORD"
@@ -314,23 +184,19 @@ EOF
     "initConnReceiveWindow": 33554432,
     "maxConnReceiveWindow": 33554432
   },
-  "port-hopping": {
-    "enabled": true,
-    "ports": [7011, 7012, 7013, 7014, 7015, 7016, 7017, 7018, 7019, 7020, 7021, 7022, 7023, 7024, 7025, 7026, 7027, 7028, 7029, 7030, 7031, 7032, 7033, 7034, 7035, 7036, 7037, 7038, 7039, 7040, 7041, 7042, 7043, 7044, 7045, 7046, 7047, 7048, 7049, 7050],
-    "interval": 20
-  },
   "socks5": {
     "listen": "127.0.0.1:5678"
   },
   "transport": {
+    "type": "udp",
     "udp": {
-      "hopInterval": "30s"
+      "hopInterval": "20s"
     }
   }
 }
 EOF
 
-    url="hy2://$HY_PASSWORD@$last_ip:$HYSTERIA_PORT/?insecure=1&sni=$MASQUERADE_HOST&obfs=salamander&obfs-password=$HY_OBFS_PASSWORD#$node_name"
+    url="hy2://$HY_PASSWORD@$last_ip:7011-7050/?insecure=1&sni=$MASQUERADE_HOST&obfs=salamander&obfs-password=$HY_OBFS_PASSWORD#$node_name"
     echo $url > /root/hy/url.txt
 
     cat > /etc/systemd/system/hysteria-server.service << EOF
@@ -347,6 +213,68 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    yellow "正在配置 iptables 端口转发（7012-7050 -> $HYSTERIA_PORT）..."
+    INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+    if [[ -z "$INTERFACE" ]]; then
+        INTERFACE=$(ip -4 route show default | awk '{print $5}' | head -n1)
+    fi
+    
+    if [[ -n "$INTERFACE" ]] && command -v iptables &> /dev/null; then
+        for port in {7012..7050}; do
+            iptables -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+        done
+        
+        for port in {7012..7050}; do
+            iptables -t nat -A PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT
+        done
+        
+        if command -v ip6tables &> /dev/null && ip -6 route show default &> /dev/null; then
+            for port in {7012..7050}; do
+                ip6tables -t nat -A PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+            done
+        fi
+        
+        mkdir -p /etc/iptables
+        iptables-save > /etc/iptables/rules.v4
+        if command -v ip6tables &> /dev/null; then
+            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null
+        fi
+        
+        if [ -f /etc/sysconfig/iptables ]; then
+            iptables-save > /etc/sysconfig/iptables
+        fi
+        
+        if command -v netfilter-persistent &> /dev/null; then
+            netfilter-persistent save 2>/dev/null
+        elif command -v iptables-persistent &> /dev/null; then
+            iptables-persistent save 2>/dev/null
+        fi
+        
+        if [ ! -f /etc/systemd/system/iptables-restore.service ]; then
+            cat > /etc/systemd/system/iptables-restore.service << 'IPTABLES_EOF'
+[Unit]
+Description=Restore iptables rules
+After=network.target
+Before=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables-restore /etc/iptables/rules.v4
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+IPTABLES_EOF
+            systemctl daemon-reload
+            systemctl enable iptables-restore >/dev/null 2>&1
+        fi
+        
+        green "✅ iptables 端口转发配置完成"
+    else
+        yellow "⚠️  未检测到 iptables 或网络接口，请手动配置端口转发"
+        yellow "   命令: iptables -t nat -A PREROUTING -i <interface> -p udp --dport 7012:7050 -j REDIRECT --to-ports $HYSTERIA_PORT"
+    fi
 
     systemctl daemon-reload
     systemctl enable hysteria-server > /dev/null 2>&1
@@ -384,7 +312,7 @@ EOF
         red "$url"
         green "======================================================================================"
     else
-        red "Hysteria 2 服务启动失败，请检查日志" && exit 1
+        red "Hysteria 2 服务启动失败" && exit 1
     fi
 }
 
@@ -396,6 +324,38 @@ uninstall_hy2() {
     rm -f /etc/systemd/system/hysteria-autostart.service
     rm -f /lib/systemd/system/hysteria-server.service /lib/systemd/system/hysteria-server@.service
     rm -rf /usr/local/bin/hysteria /etc/hysteria /root/hy
+
+    yellow "正在清理 iptables 端口转发规则..."
+    INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+    if [[ -z "$INTERFACE" ]]; then
+        INTERFACE=$(ip -4 route show default | awk '{print $5}' | head -n1)
+    fi
+    
+    if [[ -n "$INTERFACE" ]] && command -v iptables &> /dev/null; then
+        for port in {7012..7050}; do
+            iptables -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+        done
+        
+        if command -v ip6tables &> /dev/null; then
+            for port in {7012..7050}; do
+                ip6tables -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+            done
+        fi
+        
+        if [ -d /etc/iptables ]; then
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null
+        fi
+        if [ -f /etc/sysconfig/iptables ]; then
+            iptables-save > /etc/sysconfig/iptables 2>/dev/null
+        fi
+        
+        systemctl stop iptables-restore >/dev/null 2>&1
+        systemctl disable iptables-restore >/dev/null 2>&1
+        rm -f /etc/systemd/system/iptables-restore.service
+        systemctl daemon-reload
+        
+        green "✅ iptables 规则已清理"
+    fi
 
     systemctl daemon-reload
 
@@ -473,7 +433,7 @@ menu() {
     echo -e "#                 ${GREEN}Hysteria 2 一键配置脚本${PLAIN}                  #"
     echo "#############################################################"
     echo ""
-    echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2 (端口$HYSTERIA_PORT, 伪装$MASQUERADE_HOST, 自签证书)"
+    echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
     echo -e " ${RED}2.${PLAIN} 卸载 Hysteria 2"
     echo "------------------------------------------------------------"
     echo -e " ${GREEN}3.${PLAIN} 关闭、开启、重启 Hysteria 2"
@@ -502,7 +462,6 @@ change_port() {
         menu
         return
     fi
-    # 修改配置文件中的端口
     if [ -f /etc/hysteria/config.yaml ]; then
         sed -i "s/^listen: :[0-9]\+/listen: :$new_port/" /etc/hysteria/config.yaml
     fi
