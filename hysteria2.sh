@@ -4,10 +4,11 @@ RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
 PLAIN="\033[0m"
-# 与 Windows 下 config.yaml 保持一致的端口 / 伪装域名 / 密码
-HYSTERIA_PORT=8443
+# 与当前 Windows config.yaml 保持一致：监听 7011，并启用 7011-7050 端口跳跃
+HYSTERIA_PORT=7011
 MASQUERADE_HOST=www.bing.com
 HY_PASSWORD=9e264d67-fe47-4d2f-b55e-631a12e46a30
+HY_OBFS_PASSWORD=wGW1duwjo7gWV0F4aqJu44jJBG4ELk3WNgbs3ATJu3M
 red(){ echo -e "\033[31m\033[01m$1\033[0m"; }
 green(){ echo -e "\033[32m\033[01m$1\033[0m"; }
 yellow(){ echo -e "\033[33m\033[01m$1\033[0m"; }
@@ -102,10 +103,55 @@ quic:
   initConnReceiveWindow: 33554432
   maxConnReceiveWindow: 33554432
 
+port-hopping:
+  enabled: true
+  ports:
+    - 7011
+    - 7012
+    - 7013
+    - 7014
+    - 7015
+    - 7016
+    - 7017
+    - 7018
+    - 7019
+    - 7020
+    - 7021
+    - 7022
+    - 7023
+    - 7024
+    - 7025
+    - 7026
+    - 7027
+    - 7028
+    - 7029
+    - 7030
+    - 7031
+    - 7032
+    - 7033
+    - 7034
+    - 7035
+    - 7036
+    - 7037
+    - 7038
+    - 7039
+    - 7040
+    - 7041
+    - 7042
+    - 7043
+    - 7044
+    - 7045
+    - 7046
+    - 7047
+    - 7048
+    - 7049
+    - 7050
+  interval: 20
+
 obfs:
   type: salamander
   salamander:
-    password: "$HY_PASSWORD"
+    password: "$HY_OBFS_PASSWORD"
 
 auth:
   type: password
@@ -138,7 +184,7 @@ auth:
 obfs:
   type: salamander
   salamander:
-    password: "$HY_PASSWORD"
+    password: "$HY_OBFS_PASSWORD"
 
 tls:
   sni: $MASQUERADE_HOST
@@ -170,7 +216,7 @@ EOF
   "obfs": {
     "type": "salamander",
     "salamander": {
-      "password": "$HY_PASSWORD"
+      "password": "$HY_OBFS_PASSWORD"
     }
   },
   "tls": {
@@ -194,7 +240,7 @@ EOF
 }
 EOF
 
-    url="hy2://$HY_PASSWORD@$last_ip:$HYSTERIA_PORT/?insecure=1&sni=$MASQUERADE_HOST&obfs=salamander&obfs-password=$HY_PASSWORD#$node_name"
+    url="hy2://$HY_PASSWORD@$last_ip:$HYSTERIA_PORT/?insecure=1&sni=$MASQUERADE_HOST&obfs=salamander&obfs-password=$HY_OBFS_PASSWORD#$node_name"
     echo $url > /root/hy/url.txt
 
     cat > /etc/systemd/system/hysteria-server.service << EOF
