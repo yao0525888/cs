@@ -215,30 +215,80 @@ WantedBy=multi-user.target
 EOF
 
     yellow "正在配置 iptables 端口转发（7012-7050 -> $HYSTERIA_PORT）..."
-    INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-    if [[ -z "$INTERFACE" ]]; then
-        INTERFACE=$(ip -4 route show default | awk '{print $5}' | head -n1)
+    
+    INTERFACE=""
+    if command -v ip &> /dev/null; then
+        INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+        if [[ -z "$INTERFACE" ]]; then
+            INTERFACE=$(ip -4 route show default | awk '{print $5}' | head -n1)
+        fi
+        if [[ -z "$INTERFACE" ]]; then
+            INTERFACE=$(ip link show | grep -E "^[0-9]+:" | grep -v lo | head -n1 | awk -F': ' '{print $2}' | awk '{print $1}')
+        fi
     fi
     
-    if [[ -n "$INTERFACE" ]] && command -v iptables &> /dev/null; then
+    if [[ -z "$INTERFACE" ]] && [ -d /sys/class/net ]; then
+        for iface in /sys/class/net/*; do
+            ifname=$(basename "$iface")
+            if [[ "$ifname" != "lo" ]] && [ -f "$iface/operstate" ]; then
+                if grep -q "up" "$iface/operstate" 2>/dev/null || [ -f "$iface/carrier" ]; then
+                    INTERFACE="$ifname"
+                    break
+                fi
+            fi
+        done
+    fi
+    
+    IPTABLES_CMD=""
+    if command -v iptables &> /dev/null; then
+        IPTABLES_CMD=$(command -v iptables)
+    elif [ -f /sbin/iptables ]; then
+        IPTABLES_CMD="/sbin/iptables"
+    elif [ -f /usr/sbin/iptables ]; then
+        IPTABLES_CMD="/usr/sbin/iptables"
+    fi
+    
+    if [[ -n "$INTERFACE" ]] && [[ -n "$IPTABLES_CMD" ]]; then
         for port in {7012..7050}; do
-            iptables -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+            $IPTABLES_CMD -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
         done
         
         for port in {7012..7050}; do
-            iptables -t nat -A PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT
+            $IPTABLES_CMD -t nat -A PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT
         done
         
-        if command -v ip6tables &> /dev/null && ip -6 route show default &> /dev/null; then
+        IP6TABLES_CMD=""
+        if command -v ip6tables &> /dev/null; then
+            IP6TABLES_CMD=$(command -v ip6tables)
+        elif [ -f /sbin/ip6tables ]; then
+            IP6TABLES_CMD="/sbin/ip6tables"
+        elif [ -f /usr/sbin/ip6tables ]; then
+            IP6TABLES_CMD="/usr/sbin/ip6tables"
+        fi
+        
+        if [[ -n "$IP6TABLES_CMD" ]] && ip -6 route show default &> /dev/null 2>&1; then
             for port in {7012..7050}; do
-                ip6tables -t nat -A PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+                $IP6TABLES_CMD -t nat -A PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
             done
         fi
         
         mkdir -p /etc/iptables
-        iptables-save > /etc/iptables/rules.v4
-        if command -v ip6tables &> /dev/null; then
-            ip6tables-save > /etc/iptables/rules.v6 2>/dev/null
+        if command -v iptables-save &> /dev/null; then
+            iptables-save > /etc/iptables/rules.v4
+        elif [ -f /sbin/iptables-save ]; then
+            /sbin/iptables-save > /etc/iptables/rules.v4
+        elif [ -f /usr/sbin/iptables-save ]; then
+            /usr/sbin/iptables-save > /etc/iptables/rules.v4
+        fi
+        
+        if [[ -n "$IP6TABLES_CMD" ]]; then
+            if command -v ip6tables-save &> /dev/null; then
+                ip6tables-save > /etc/iptables/rules.v6 2>/dev/null
+            elif [ -f /sbin/ip6tables-save ]; then
+                /sbin/ip6tables-save > /etc/iptables/rules.v6 2>/dev/null
+            elif [ -f /usr/sbin/ip6tables-save ]; then
+                /usr/sbin/ip6tables-save > /etc/iptables/rules.v6 2>/dev/null
+            fi
         fi
         
         if [ -f /etc/sysconfig/iptables ]; then
@@ -270,10 +320,36 @@ IPTABLES_EOF
             systemctl enable iptables-restore >/dev/null 2>&1
         fi
         
-        green "✅ iptables 端口转发配置完成"
+        green "✅ iptables 端口转发配置完成（接口: $INTERFACE）"
     else
-        yellow "⚠️  未检测到 iptables 或网络接口，请手动配置端口转发"
-        yellow "   命令: iptables -t nat -A PREROUTING -i <interface> -p udp --dport 7012:7050 -j REDIRECT --to-ports $HYSTERIA_PORT"
+        yellow "⚠️  未检测到 iptables 或网络接口"
+        if [[ -z "$INTERFACE" ]]; then
+            yellow "   检测到的网络接口: 无"
+            yellow "   可用接口列表:"
+            if command -v ip &> /dev/null; then
+                ip link show | grep -E "^[0-9]+:" | awk -F': ' '{print "     - " $2}' || echo "     无法获取"
+            elif [ -d /sys/class/net ]; then
+                ls -1 /sys/class/net | grep -v lo | while read iface; do
+                    echo "     - $iface"
+                done
+            fi
+        else
+            yellow "   检测到的网络接口: $INTERFACE"
+        fi
+        if [[ -z "$IPTABLES_CMD" ]]; then
+            yellow "   iptables 命令: 未找到"
+            yellow "   请安装 iptables: apt-get install iptables 或 yum install iptables"
+        else
+            yellow "   iptables 命令: $IPTABLES_CMD"
+        fi
+        yellow ""
+        yellow "   手动配置命令:"
+        if [[ -n "$INTERFACE" ]]; then
+            yellow "   iptables -t nat -A PREROUTING -i $INTERFACE -p udp --dport 7012:7050 -j REDIRECT --to-ports $HYSTERIA_PORT"
+        else
+            yellow "   iptables -t nat -A PREROUTING -i <interface> -p udp --dport 7012:7050 -j REDIRECT --to-ports $HYSTERIA_PORT"
+            yellow "   请将 <interface> 替换为实际网络接口名称（如 eth0、ens33 等）"
+        fi
     fi
 
     systemctl daemon-reload
@@ -326,27 +402,76 @@ uninstall_hy2() {
     rm -rf /usr/local/bin/hysteria /etc/hysteria /root/hy
 
     yellow "正在清理 iptables 端口转发规则..."
-    INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
-    if [[ -z "$INTERFACE" ]]; then
-        INTERFACE=$(ip -4 route show default | awk '{print $5}' | head -n1)
+    
+    INTERFACE=""
+    if command -v ip &> /dev/null; then
+        INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+        if [[ -z "$INTERFACE" ]]; then
+            INTERFACE=$(ip -4 route show default | awk '{print $5}' | head -n1)
+        fi
+        if [[ -z "$INTERFACE" ]]; then
+            INTERFACE=$(ip link show | grep -E "^[0-9]+:" | grep -v lo | head -n1 | awk -F': ' '{print $2}' | awk '{print $1}')
+        fi
     fi
     
-    if [[ -n "$INTERFACE" ]] && command -v iptables &> /dev/null; then
+    if [[ -z "$INTERFACE" ]] && [ -d /sys/class/net ]; then
+        for iface in /sys/class/net/*; do
+            ifname=$(basename "$iface")
+            if [[ "$ifname" != "lo" ]] && [ -f "$iface/operstate" ]; then
+                if grep -q "up" "$iface/operstate" 2>/dev/null || [ -f "$iface/carrier" ]; then
+                    INTERFACE="$ifname"
+                    break
+                fi
+            fi
+        done
+    fi
+    
+    IPTABLES_CMD=""
+    if command -v iptables &> /dev/null; then
+        IPTABLES_CMD=$(command -v iptables)
+    elif [ -f /sbin/iptables ]; then
+        IPTABLES_CMD="/sbin/iptables"
+    elif [ -f /usr/sbin/iptables ]; then
+        IPTABLES_CMD="/usr/sbin/iptables"
+    fi
+    
+    if [[ -n "$INTERFACE" ]] && [[ -n "$IPTABLES_CMD" ]]; then
         for port in {7012..7050}; do
-            iptables -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+            $IPTABLES_CMD -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
         done
         
+        IP6TABLES_CMD=""
         if command -v ip6tables &> /dev/null; then
+            IP6TABLES_CMD=$(command -v ip6tables)
+        elif [ -f /sbin/ip6tables ]; then
+            IP6TABLES_CMD="/sbin/ip6tables"
+        elif [ -f /usr/sbin/ip6tables ]; then
+            IP6TABLES_CMD="/usr/sbin/ip6tables"
+        fi
+        
+        if [[ -n "$IP6TABLES_CMD" ]]; then
             for port in {7012..7050}; do
-                ip6tables -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
+                $IP6TABLES_CMD -t nat -D PREROUTING -i $INTERFACE -p udp --dport $port -j REDIRECT --to-ports $HYSTERIA_PORT 2>/dev/null
             done
         fi
         
         if [ -d /etc/iptables ]; then
-            iptables-save > /etc/iptables/rules.v4 2>/dev/null
+            if command -v iptables-save &> /dev/null; then
+                iptables-save > /etc/iptables/rules.v4 2>/dev/null
+            elif [ -f /sbin/iptables-save ]; then
+                /sbin/iptables-save > /etc/iptables/rules.v4 2>/dev/null
+            elif [ -f /usr/sbin/iptables-save ]; then
+                /usr/sbin/iptables-save > /etc/iptables/rules.v4 2>/dev/null
+            fi
         fi
         if [ -f /etc/sysconfig/iptables ]; then
-            iptables-save > /etc/sysconfig/iptables 2>/dev/null
+            if command -v iptables-save &> /dev/null; then
+                iptables-save > /etc/sysconfig/iptables 2>/dev/null
+            elif [ -f /sbin/iptables-save ]; then
+                /sbin/iptables-save > /etc/sysconfig/iptables 2>/dev/null
+            elif [ -f /usr/sbin/iptables-save ]; then
+                /usr/sbin/iptables-save > /etc/sysconfig/iptables 2>/dev/null
+            fi
         fi
         
         systemctl stop iptables-restore >/dev/null 2>&1
