@@ -555,7 +555,7 @@ service_menu() {
 menu() {
     clear
     echo "#############################################################"
-    echo -e "#                 ${GREEN}Hysteria 2 一键配置脚本${PLAIN}                  #"
+    echo -e "#                 ${GREEN}Hysteria 2 一键配置脚本1${PLAIN}                  #"
     echo "#############################################################"
     echo ""
     echo -e " ${GREEN}1.${PLAIN} 安装 Hysteria 2"
