@@ -6,6 +6,8 @@ XUI_USER="admin"
 XUI_PASS="yao581581"
 XUI_BIN_URL="https://github.com/vaxilu/x-ui/releases/latest/download/x-ui-linux-amd64.tar.gz"
 INSTALL_DIR="/usr/local/x-ui"
+APP_DIR="${INSTALL_DIR}/x-ui"
+BIN_PATH="${APP_DIR}/x-ui"
 SERVICE_NAME="x-ui"
 
 need_root() { [ "$(id -u)" -eq 0 ] || { echo "请用 root 运行"; exit 1; }; }
@@ -25,12 +27,13 @@ install_xui() {
   fi
   ok "依赖安装完成"
 
+  rm -rf "$APP_DIR"
   mkdir -p "$INSTALL_DIR"
   cd "$INSTALL_DIR"
   tmp_tar="/tmp/x-ui.tar.gz"
   wget -O "$tmp_tar" "$XUI_BIN_URL"
   tar -xzf "$tmp_tar" -C "$INSTALL_DIR"
-  chmod +x ${INSTALL_DIR}/x-ui/x-ui
+  chmod +x "${BIN_PATH}"
   ok "x-ui 下载并解压完成"
 
   cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
@@ -40,8 +43,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=${INSTALL_DIR}/x-ui
-ExecStart=${INSTALL_DIR}/x-ui/x-ui
+WorkingDirectory=${APP_DIR}
+ExecStart=${BIN_PATH}
 Restart=always
 RestartSec=5
 
@@ -62,7 +65,7 @@ EOF
   fi
   ok "服务已启动"
 
-  ${INSTALL_DIR}/x-ui/x-ui setting -port ${XUI_PORT} -username "${XUI_USER}" -password "${XUI_PASS}"
+  ${BIN_PATH} setting -port ${XUI_PORT} -username "${XUI_USER}" -password "${XUI_PASS}"
   systemctl restart ${SERVICE_NAME}
   ok "账号与端口已配置：${XUI_USER}/${XUI_PASS} @ ${XUI_PORT}"
 
