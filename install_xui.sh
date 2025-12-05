@@ -62,7 +62,7 @@ EOF
   fi
   ok "服务已启动"
 
-  ${INSTALL_DIR}/x-ui/x-ui setting -port ${XUI_PORT} -user "${XUI_USER}" -password "${XUI_PASS}"
+  ${INSTALL_DIR}/x-ui/x-ui setting -port ${XUI_PORT} -username "${XUI_USER}" -password "${XUI_PASS}"
   systemctl restart ${SERVICE_NAME}
   ok "账号与端口已配置：${XUI_USER}/${XUI_PASS} @ ${XUI_PORT}"
 
