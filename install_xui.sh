@@ -12,28 +12,28 @@ need_root() { [ "$(id -u)" -eq 0 ] || { echo "请用 root 运行"; exit 1; }; }
 ok() { echo -e "[OK] $*"; }
 fail() { echo -e "[ERR] $*" >&2; exit 1; }
 
-need_root
+install_xui() {
+  need_root
+  if command -v apt >/dev/null 2>&1; then
+    apt update
+    apt install -y curl wget tar
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y epel-release
+    yum install -y curl wget tar
+  else
+    fail "未检测到 apt 或 yum，请手动安装 curl/wget/tar"
+  fi
+  ok "依赖安装完成"
 
-if command -v apt >/dev/null 2>&1; then
-  apt update
-  apt install -y curl wget tar
-elif command -v yum >/dev/null 2>&1; then
-  yum install -y epel-release
-  yum install -y curl wget tar
-else
-  fail "未检测到 apt 或 yum，请手动安装 curl/wget/tar"
-fi
-ok "依赖安装完成"
+  mkdir -p "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
+  tmp_tar="/tmp/x-ui.tar.gz"
+  wget -O "$tmp_tar" "$XUI_BIN_URL"
+  tar -xzf "$tmp_tar" -C "$INSTALL_DIR"
+  chmod +x x-ui
+  ok "x-ui 下载并解压完成"
 
-mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR"
-tmp_tar="/tmp/x-ui.tar.gz"
-wget -O "$tmp_tar" "$XUI_BIN_URL"
-tar -xzf "$tmp_tar" -C "$INSTALL_DIR"
-chmod +x x-ui bin/x-ui
-ok "x-ui 下载并解压完成"
-
-cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
+  cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
 Description=x-ui service
 After=network.target
@@ -49,21 +49,21 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable ${SERVICE_NAME}
-ok "systemd 服务创建完成"
+  systemctl daemon-reload
+  systemctl enable ${SERVICE_NAME}
+  ok "systemd 服务创建完成"
 
-systemctl restart ${SERVICE_NAME}
-sleep 2
-systemctl is-active --quiet ${SERVICE_NAME} || fail "服务启动失败"
-ok "服务已启动"
+  systemctl restart ${SERVICE_NAME}
+  sleep 2
+  systemctl is-active --quiet ${SERVICE_NAME} || fail "服务启动失败"
+  ok "服务已启动"
 
-${INSTALL_DIR}/x-ui setting -port ${XUI_PORT} -user "${XUI_USER}" -password "${XUI_PASS}"
-systemctl restart ${SERVICE_NAME}
-ok "账号与端口已配置：${XUI_USER}/${XUI_PASS} @ ${XUI_PORT}"
+  ${INSTALL_DIR}/x-ui setting -port ${XUI_PORT} -user "${XUI_USER}" -password "${XUI_PASS}"
+  systemctl restart ${SERVICE_NAME}
+  ok "账号与端口已配置：${XUI_USER}/${XUI_PASS} @ ${XUI_PORT}"
 
-PUBLIC_IP="$(curl -4 -s https://api.ipify.org || curl -s https://ifconfig.me || echo "未获取公网IP")"
-cat <<INFO
+  PUBLIC_IP="$(curl -4 -s https://api.ipify.org || curl -s https://ifconfig.me || echo "未获取公网IP")"
+  cat <<INFO
 -----------------------------
 x-ui 已安装并运行
 面板地址: http://${PUBLIC_IP}:${XUI_PORT}
@@ -73,4 +73,34 @@ x-ui 已安装并运行
 文件路径: ${INSTALL_DIR}
 -----------------------------
 INFO
+}
 
+uninstall_xui() {
+  need_root
+  if systemctl list-unit-files | grep -q "^${SERVICE_NAME}.service"; then
+    systemctl stop ${SERVICE_NAME} || true
+    systemctl disable ${SERVICE_NAME} || true
+    rm -f /etc/systemd/system/${SERVICE_NAME}.service
+    systemctl daemon-reload
+  fi
+  rm -rf "${INSTALL_DIR}"
+  rm -f /tmp/x-ui.tar.gz
+  ok "x-ui 已卸载"
+}
+
+menu() {
+  echo "1) 安装 x-ui"
+  echo "2) 卸载 x-ui"
+  read -rp "选择操作 [1/2]: " c
+  case "$c" in
+    1|"") install_xui ;;
+    2) uninstall_xui ;;
+    *) echo "无效选择"; exit 1 ;;
+  esac
+}
+
+case "${1:-}" in
+  install) install_xui ;;
+  uninstall) uninstall_xui ;;
+  *) menu ;;
+esac
