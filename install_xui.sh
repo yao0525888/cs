@@ -30,7 +30,7 @@ install_xui() {
   tmp_tar="/tmp/x-ui.tar.gz"
   wget -O "$tmp_tar" "$XUI_BIN_URL"
   tar -xzf "$tmp_tar" -C "$INSTALL_DIR"
-  chmod +x x-ui
+  chmod +x ${INSTALL_DIR}/x-ui/x-ui
   ok "x-ui 下载并解压完成"
 
   cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
@@ -40,8 +40,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/x-ui
+WorkingDirectory=${INSTALL_DIR}/x-ui
+ExecStart=${INSTALL_DIR}/x-ui/x-ui
 Restart=always
 RestartSec=5
 
@@ -62,7 +62,7 @@ EOF
   fi
   ok "服务已启动"
 
-  ${INSTALL_DIR}/x-ui setting -port ${XUI_PORT} -user "${XUI_USER}" -password "${XUI_PASS}"
+  ${INSTALL_DIR}/x-ui/x-ui setting -port ${XUI_PORT} -user "${XUI_USER}" -password "${XUI_PASS}"
   systemctl restart ${SERVICE_NAME}
   ok "账号与端口已配置：${XUI_USER}/${XUI_PASS} @ ${XUI_PORT}"
 
