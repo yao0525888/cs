@@ -55,7 +55,11 @@ EOF
 
   systemctl restart ${SERVICE_NAME}
   sleep 2
-  systemctl is-active --quiet ${SERVICE_NAME} || fail "服务启动失败"
+  if ! systemctl is-active --quiet ${SERVICE_NAME}; then
+    echo "[ERR] 服务启动失败，最近日志："
+    journalctl -u ${SERVICE_NAME} -n 40 --no-pager || true
+    fail "请根据日志修复后重试"
+  fi
   ok "服务已启动"
 
   ${INSTALL_DIR}/x-ui setting -port ${XUI_PORT} -user "${XUI_USER}" -password "${XUI_PASS}"
