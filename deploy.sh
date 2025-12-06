@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "  客户数据管理系统 - Linux部署脚本1"
+echo "  客户数据管理系统 - Linux部署脚本"
 echo "=========================================="
 echo ""
 
@@ -66,17 +66,24 @@ get_file() {
 }
 
 echo "正在安装Nginx..."
+NGINX_INSTALLED=false
+
 if command -v apt-get &> /dev/null; then
     echo "检查Nginx是否已安装..."
-    if command -v nginx &> /dev/null; then
+    if command -v nginx &> /dev/null && [ -d "/etc/nginx" ]; then
         echo "Nginx已安装，版本: $(nginx -v 2>&1)"
+        NGINX_INSTALLED=true
     else
-        echo "更新软件包列表（忽略404错误）..."
-        apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" || true
+        echo "更新软件包列表..."
+        apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" || true
         
-        echo "安装Nginx（忽略缺失的包）..."
-        if apt-get install -y --fix-missing nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch"; then
-            echo "Nginx安装完成"
+        echo "安装Nginx..."
+        INSTALL_OUTPUT=$(apt-get install -y --fix-missing nginx 2>&1)
+        INSTALL_STATUS=$?
+        
+        if [ $INSTALL_STATUS -eq 0 ] && [ -d "/etc/nginx" ] && command -v nginx &> /dev/null; then
+            echo "Nginx安装成功"
+            NGINX_INSTALLED=true
         else
             echo ""
             echo "=========================================="
@@ -86,34 +93,50 @@ if command -v apt-get &> /dev/null; then
             
             if [ -f /etc/apt/sources.list ]; then
                 echo "备份当前sources.list..."
-                cp /etc/apt/sources.list /etc/apt/sources.list.bak
+                cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
                 
                 echo "切换到阿里云镜像源..."
                 sed -i 's|mirrors.tencentyun.com|mirrors.aliyun.com|g' /etc/apt/sources.list
-                sed -i 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
+                if [ -f /etc/apt/sources.list.d/debian-security.list ]; then
+                    sed -i 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian-security.list
+                fi
                 
                 echo "更新软件包列表..."
-                apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" || true
+                apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" || true
                 
                 echo "重新尝试安装Nginx..."
-                if apt-get install -y nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch"; then
-                    echo "Nginx安装成功"
-                else
-                    echo "安装仍然失败，检查Nginx是否可用..."
-                    if command -v nginx &> /dev/null; then
-                        echo "Nginx已可用，继续部署"
-                    else
-                        echo ""
-                        echo "请手动安装Nginx："
-                        echo "  sudo apt-get update"
-                        echo "  sudo apt-get install -y nginx"
-                        echo ""
-                        read -p "是否继续部署（如果Nginx已安装）？[y/N]: " continue_choice
-                        if [[ ! $continue_choice =~ ^[Yy]$ ]]; then
-                            exit 1
-                        fi
+                if apt-get install -y nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:"; then
+                    if [ -d "/etc/nginx" ] && command -v nginx &> /dev/null; then
+                        echo "Nginx安装成功"
+                        NGINX_INSTALLED=true
                     fi
                 fi
+            fi
+            
+            if [ "$NGINX_INSTALLED" = false ]; then
+                echo ""
+                echo "=========================================="
+                echo "Nginx安装失败"
+                echo "=========================================="
+                echo "请手动执行以下命令安装Nginx："
+                echo ""
+                echo "1. 修复软件源："
+                echo "   sudo sed -i 's/mirrors.tencentyun.com/mirrors.aliyun.com/g' /etc/apt/sources.list"
+                echo "   sudo sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
+                echo "   sudo apt-get update"
+                echo ""
+                echo "2. 安装Nginx："
+                echo "   sudo apt-get install -y nginx"
+                echo ""
+                echo "3. 验证安装："
+                echo "   nginx -v"
+                echo "   ls -la /etc/nginx"
+                echo ""
+                echo "4. 重新运行部署脚本："
+                echo "   sudo bash deploy.sh"
+                echo ""
+                echo "=========================================="
+                exit 1
             fi
         fi
     fi
@@ -145,8 +168,22 @@ chmod 644 "$WEB_DIR/$FILE_NAME"
 
 echo "配置Nginx..."
 if [ ! -d "/etc/nginx" ]; then
-    echo "错误：/etc/nginx 目录不存在，Nginx可能未正确安装"
-    echo "请手动安装Nginx: sudo apt-get install -y nginx"
+    echo ""
+    echo "=========================================="
+    echo "错误：/etc/nginx 目录不存在"
+    echo "Nginx未正确安装"
+    echo "=========================================="
+    echo "请先安装Nginx："
+    echo ""
+    echo "1. 修复软件源："
+    echo "   sudo sed -i 's/mirrors.tencentyun.com/mirrors.aliyun.com/g' /etc/apt/sources.list"
+    echo "   sudo apt-get update"
+    echo ""
+    echo "2. 安装Nginx："
+    echo "   sudo apt-get install -y nginx"
+    echo ""
+    echo "3. 重新运行部署脚本"
+    echo "=========================================="
     exit 1
 fi
 
