@@ -19,8 +19,115 @@ fi
 echo "请选择操作："
 echo "1) 安装"
 echo "2) 卸载"
-read -p "请输入选项 [1-2] (默认1): " action
+echo "3) 更新 default.html 文件"
+read -p "请输入选项 [1-3] (默认1): " action
 action=${action:-1}
+
+if [ "$action" = "3" ]; then
+    echo ""
+    echo "=========================================="
+    echo "  更新 default.html 文件"
+    echo "=========================================="
+    echo ""
+    
+    if [ ! -f "$WEB_DIR/$FILE_NAME" ]; then
+        echo "错误：未找到已部署的 $FILE_NAME 文件"
+        echo "请先运行安装选项（选项1）"
+        exit 1
+    fi
+    
+    echo "正在备份当前文件..."
+    BACKUP_FILE="$WEB_DIR/${FILE_NAME}.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$WEB_DIR/$FILE_NAME" "$BACKUP_FILE" 2>/dev/null || {
+        echo "警告：无法创建备份文件，继续更新..."
+    }
+    if [ -f "$BACKUP_FILE" ]; then
+        echo "备份已创建: $BACKUP_FILE"
+    fi
+    
+    if [ -f "$CURRENT_DIR/$FILE_NAME" ]; then
+        echo "检测到本地 $FILE_NAME 文件，使用本地文件..."
+        cp "$CURRENT_DIR/$FILE_NAME" "$WEB_DIR/$FILE_NAME"
+        if [ -f "$WEB_DIR/$FILE_NAME" ] && [ -s "$WEB_DIR/$FILE_NAME" ]; then
+            echo "本地文件复制成功"
+        else
+            echo "错误：本地文件复制失败"
+            exit 1
+        fi
+    else
+        echo "正在从GitHub下载最新文件..."
+        if command -v wget &> /dev/null; then
+            if wget -q "$GITHUB_URL" -O "$WEB_DIR/$FILE_NAME.new" 2>/dev/null; then
+                if [ -f "$WEB_DIR/$FILE_NAME.new" ] && [ -s "$WEB_DIR/$FILE_NAME.new" ]; then
+                    echo "文件下载成功"
+                    mv "$WEB_DIR/$FILE_NAME.new" "$WEB_DIR/$FILE_NAME"
+                else
+                    echo "错误：下载的文件无效"
+                    rm -f "$WEB_DIR/$FILE_NAME.new" 2>/dev/null || true
+                    exit 1
+                fi
+            else
+                echo "错误：文件下载失败"
+                rm -f "$WEB_DIR/$FILE_NAME.new" 2>/dev/null || true
+                exit 1
+            fi
+        elif command -v curl &> /dev/null; then
+            if curl -sL "$GITHUB_URL" -o "$WEB_DIR/$FILE_NAME.new" 2>/dev/null; then
+                if [ -f "$WEB_DIR/$FILE_NAME.new" ] && [ -s "$WEB_DIR/$FILE_NAME.new" ]; then
+                    echo "文件下载成功"
+                    mv "$WEB_DIR/$FILE_NAME.new" "$WEB_DIR/$FILE_NAME"
+                else
+                    echo "错误：下载的文件无效"
+                    rm -f "$WEB_DIR/$FILE_NAME.new" 2>/dev/null || true
+                    exit 1
+                fi
+            else
+                echo "错误：文件下载失败"
+                rm -f "$WEB_DIR/$FILE_NAME.new" 2>/dev/null || true
+                exit 1
+            fi
+        else
+            echo "错误：未找到wget或curl，无法下载文件"
+            echo "请手动安装: sudo apt install wget 或 sudo yum install wget"
+            exit 1
+        fi
+    fi
+    
+    echo "设置文件权限..."
+    chown www-data:www-data "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown nginx:nginx "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown root:root "$WEB_DIR/$FILE_NAME" 2>/dev/null || true
+    chmod 644 "$WEB_DIR/$FILE_NAME"
+    
+    echo "重新加载Nginx配置..."
+    if pgrep -x nginx > /dev/null; then
+        if systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || true; then
+            echo "Nginx配置已重新加载"
+        else
+            NGINX_BIN=""
+            if command -v nginx &> /dev/null; then
+                NGINX_BIN=$(which nginx)
+            elif [ -f "/usr/local/nginx/sbin/nginx" ]; then
+                NGINX_BIN="/usr/local/nginx/sbin/nginx"
+            fi
+            if [ -n "$NGINX_BIN" ]; then
+                $NGINX_BIN -s reload 2>/dev/null || echo "警告：无法重新加载Nginx，但文件已更新"
+            fi
+        fi
+    else
+        echo "警告：Nginx未运行，文件已更新但需要手动启动Nginx"
+    fi
+    
+    echo ""
+    echo "=========================================="
+    echo "✅ 文件更新完成！"
+    echo "=========================================="
+    echo ""
+    if [ -f "$BACKUP_FILE" ]; then
+        echo "备份文件位置: $BACKUP_FILE"
+        echo "如需恢复，请运行: cp $BACKUP_FILE $WEB_DIR/$FILE_NAME"
+    fi
+    echo ""
+    exit 0
+fi
 
 if [ "$action" = "2" ]; then
     echo ""
