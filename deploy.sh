@@ -323,8 +323,8 @@ After=network.target remote-fs.target nss-lookup.target
 [Service]
 Type=forking
 PIDFile=/var/run/nginx.pid
-ExecStartPre=/usr/local/nginx/sbin/nginx -t
-ExecStart=/usr/local/nginx/sbin/nginx
+ExecStartPre=/usr/local/nginx/sbin/nginx -t -c /usr/local/nginx/conf/nginx.conf
+ExecStart=/usr/local/nginx/sbin/nginx -c /usr/local/nginx/conf/nginx.conf
 ExecReload=/bin/kill -s HUP $MAINPID
 KillSignal=SIGQUIT
 TimeoutStopSec=5
@@ -402,89 +402,158 @@ chown www-data:www-data "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown nginx:nginx "
 chmod 644 "$WEB_DIR/$FILE_NAME"
 
 echo "配置Nginx..."
-if [ ! -d "/etc/nginx" ]; then
-    if [ -d "/usr/local/nginx" ]; then
-        echo "检测到从源码安装的Nginx，创建配置目录..."
-        mkdir -p /etc/nginx/conf.d
-        if [ ! -f "/etc/nginx/nginx.conf" ]; then
-            if [ -f "/usr/local/nginx/conf/nginx.conf" ]; then
-                cp /usr/local/nginx/conf/nginx.conf /etc/nginx/nginx.conf
-            else
-                echo "警告：未找到nginx.conf配置文件"
+NGINX_CONF_DIR=""
+NGINX_CONF_FILE=""
+
+if [ -d "/usr/local/nginx" ]; then
+    echo "检测到从源码安装的Nginx"
+    NGINX_CONF_DIR="/usr/local/nginx/conf"
+    NGINX_CONF_FILE="/usr/local/nginx/conf/nginx.conf"
+    
+    if [ ! -f "$NGINX_CONF_FILE" ]; then
+        echo "创建Nginx主配置文件..."
+        mkdir -p "$NGINX_CONF_DIR"
+        
+        if [ -f "/usr/local/nginx/conf/mime.types" ]; then
+            MIME_TYPES="/usr/local/nginx/conf/mime.types"
+        else
+            MIME_TYPES="/etc/nginx/mime.types"
+            if [ ! -f "$MIME_TYPES" ]; then
+                echo "创建mime.types文件..."
+                cat > "$MIME_TYPES" <<'MIMETYPES'
+types {
+    text/html                             html htm shtml;
+    text/css                              css;
+    text/xml                              xml;
+    image/gif                             gif;
+    image/jpeg                            jpeg jpg;
+    application/javascript                js;
+    application/json                      json;
+}
+MIMETYPES
             fi
         fi
+        
+        cat > "$NGINX_CONF_FILE" <<NGINXMAIN
+user www-data;
+worker_processes auto;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include $MIME_TYPES;
+    default_type application/octet-stream;
+    
+    sendfile on;
+    keepalive_timeout 65;
+    
+    include $NGINX_CONF_DIR/conf.d/*.conf;
+}
+NGINXMAIN
+        echo "主配置文件已创建: $NGINX_CONF_FILE"
     else
+        echo "使用现有配置文件: $NGINX_CONF_FILE"
+        if ! grep -q "include.*conf.d" "$NGINX_CONF_FILE" 2>/dev/null; then
+            echo "在主配置文件中添加conf.d包含..."
+            if grep -q "http {" "$NGINX_CONF_FILE"; then
+                sed -i '/http {/a\    include '"$NGINX_CONF_DIR"'/conf.d/*.conf;' "$NGINX_CONF_FILE"
+            fi
+        fi
+    fi
+    
+    mkdir -p "$NGINX_CONF_DIR/conf.d"
+    cat > "$NGINX_CONF_DIR/conf.d/customer-data.conf" <<EOF
+server {
+    listen $PORT;
+    server_name _;
+    
+    root $WEB_DIR;
+    index $FILE_NAME;
+    
+    location / {
+        try_files \$uri \$uri/ /$FILE_NAME;
+    }
+    
+    location ~* \.(html|css|js|json)$ {
+        expires 1h;
+        add_header Cache-Control "public";
+    }
+    
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+EOF
+    echo "配置文件已创建: $NGINX_CONF_DIR/conf.d/customer-data.conf"
+    
+elif [ -d "/etc/nginx" ]; then
+    echo "使用系统安装的Nginx"
+    NGINX_CONF_DIR="/etc/nginx"
+    NGINX_CONF_FILE="/etc/nginx/nginx.conf"
+    
+    if [ -d "/etc/nginx/sites-available" ]; then
+        if [ ! -d "/etc/nginx/sites-enabled" ]; then
+            mkdir -p /etc/nginx/sites-enabled
+        fi
+        cat > /etc/nginx/sites-available/customer-data <<EOF
+server {
+    listen $PORT;
+    server_name _;
+    
+    root $WEB_DIR;
+    index $FILE_NAME;
+    
+    location / {
+        try_files \$uri \$uri/ /$FILE_NAME;
+    }
+    
+    location ~* \.(html|css|js|json)$ {
+        expires 1h;
+        add_header Cache-Control "public";
+    }
+    
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+EOF
+        ln -sf /etc/nginx/sites-available/customer-data /etc/nginx/sites-enabled/
+        echo "配置文件已创建: /etc/nginx/sites-available/customer-data"
+    else
+        if [ ! -d "/etc/nginx/conf.d" ]; then
+            mkdir -p /etc/nginx/conf.d
+        fi
+        cat > /etc/nginx/conf.d/customer-data.conf <<EOF
+server {
+    listen $PORT;
+    server_name _;
+    
+    root $WEB_DIR;
+    index $FILE_NAME;
+    
+    location / {
+        try_files \$uri \$uri/ /$FILE_NAME;
+    }
+    
+    location ~* \.(html|css|js|json)$ {
+        expires 1h;
+        add_header Cache-Control "public";
+    }
+    
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+EOF
+        echo "配置文件已创建: /etc/nginx/conf.d/customer-data.conf"
+    fi
+else
     echo ""
     echo "=========================================="
-    echo "错误：/etc/nginx 目录不存在"
+    echo "错误：未找到Nginx配置目录"
     echo "Nginx未正确安装"
     echo "=========================================="
-    echo "请先安装Nginx："
-    echo ""
-    echo "1. 修复软件源："
-    echo "   sudo sed -i 's/mirrors.tencentyun.com/mirrors.aliyun.com/g' /etc/apt/sources.list"
-    echo "   sudo apt-get update"
-    echo ""
-    echo "2. 安装Nginx："
-    echo "   sudo apt-get install -y nginx"
-    echo ""
-    echo "3. 重新运行部署脚本"
-    echo "=========================================="
     exit 1
-    fi
-fi
-
-if [ -d "/etc/nginx/sites-available" ]; then
-    if [ ! -d "/etc/nginx/sites-enabled" ]; then
-        mkdir -p /etc/nginx/sites-enabled
-    fi
-    cat > /etc/nginx/sites-available/customer-data <<EOF
-server {
-    listen $PORT;
-    server_name _;
-    
-    root $WEB_DIR;
-    index $FILE_NAME;
-    
-    location / {
-        try_files \$uri \$uri/ /$FILE_NAME;
-    }
-    
-    location ~* \.(html|css|js|json)$ {
-        expires 1h;
-        add_header Cache-Control "public";
-    }
-    
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-}
-EOF
-    ln -sf /etc/nginx/sites-available/customer-data /etc/nginx/sites-enabled/
-else
-    if [ ! -d "/etc/nginx/conf.d" ]; then
-        mkdir -p /etc/nginx/conf.d
-    fi
-    cat > /etc/nginx/conf.d/customer-data.conf <<EOF
-server {
-    listen $PORT;
-    server_name _;
-    
-    root $WEB_DIR;
-    index $FILE_NAME;
-    
-    location / {
-        try_files \$uri \$uri/ /$FILE_NAME;
-    }
-    
-    location ~* \.(html|css|js|json)$ {
-        expires 1h;
-        add_header Cache-Control "public";
-    }
-    
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-}
-EOF
 fi
 
 echo "检查Nginx是否可用..."
@@ -505,16 +574,25 @@ if [ -n "$NGINX_BIN" ] || command -v nginx &> /dev/null; then
     fi
     echo "测试Nginx配置..."
     if [ -n "$NGINX_BIN" ]; then
-        if $NGINX_BIN -t 2>&1; then
+        if $NGINX_BIN -t -c "$NGINX_CONF_FILE" 2>&1; then
             CONFIG_TEST=true
         else
-            CONFIG_TEST=false
+            echo "尝试使用默认配置测试..."
+            if $NGINX_BIN -t 2>&1; then
+                CONFIG_TEST=true
+            else
+                CONFIG_TEST=false
+            fi
         fi
     else
-        if nginx -t 2>&1; then
+        if nginx -t -c "$NGINX_CONF_FILE" 2>&1; then
             CONFIG_TEST=true
         else
-            CONFIG_TEST=false
+            if nginx -t 2>&1; then
+                CONFIG_TEST=true
+            else
+                CONFIG_TEST=false
+            fi
         fi
     fi
     
@@ -524,13 +602,73 @@ if [ -n "$NGINX_BIN" ] || command -v nginx &> /dev/null; then
         echo "警告：Nginx配置测试失败，但继续部署..."
     fi
     echo "启动Nginx服务..."
-    systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || /etc/init.d/nginx restart 2>/dev/null || true
-    systemctl enable nginx 2>/dev/null || true
-    sleep 2
-    if systemctl is-active --quiet nginx || pgrep -x nginx > /dev/null; then
-        echo "Nginx服务运行正常"
+    if [ -n "$NGINX_BIN" ] && [ -d "/usr/local/nginx" ]; then
+        echo "停止现有Nginx进程..."
+        pkill nginx 2>/dev/null || true
+        sleep 2
+        
+        if [ -f "/etc/systemd/system/nginx.service" ]; then
+            echo "使用systemd启动..."
+            systemctl daemon-reload 2>/dev/null || true
+            systemctl stop nginx 2>/dev/null || true
+            sleep 1
+            systemctl start nginx 2>/dev/null || {
+                echo "systemd启动失败，尝试直接启动..."
+                $NGINX_BIN -c "$NGINX_CONF_FILE" 2>&1
+            }
+            systemctl enable nginx 2>/dev/null || true
+        else
+            echo "直接启动Nginx..."
+            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>&1 || {
+                echo "启动失败，错误信息："
+                $NGINX_BIN -c "$NGINX_CONF_FILE" -t 2>&1
+            }
+        fi
     else
-        echo "警告：Nginx服务可能未启动，请手动检查"
+        systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || /etc/init.d/nginx restart 2>/dev/null || true
+        systemctl enable nginx 2>/dev/null || true
+    fi
+    
+    sleep 3
+    
+    echo "检查Nginx进程..."
+    if pgrep -x nginx > /dev/null; then
+        echo "Nginx进程运行中 (PID: $(pgrep -x nginx | head -1))"
+    else
+        echo "警告：未检测到Nginx进程"
+        echo "尝试手动启动..."
+        if [ -n "$NGINX_BIN" ] && [ -f "$NGINX_CONF_FILE" ]; then
+            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>&1
+            sleep 2
+        fi
+    fi
+    
+    echo "检查端口监听..."
+    PORT_LISTENING=false
+    if netstat -tuln 2>/dev/null | grep -q ":$PORT "; then
+        PORT_LISTENING=true
+        echo "端口 $PORT 正在监听 (netstat)"
+    elif ss -tuln 2>/dev/null | grep -q ":$PORT "; then
+        PORT_LISTENING=true
+        echo "端口 $PORT 正在监听 (ss)"
+    else
+        echo "警告：端口 $PORT 未监听"
+        echo "当前监听的端口："
+        netstat -tuln 2>/dev/null | grep LISTEN | head -5 || ss -tuln 2>/dev/null | grep LISTEN | head -5 || echo "无法获取端口信息"
+    fi
+    
+    if [ "$PORT_LISTENING" = false ]; then
+        echo ""
+        echo "诊断信息："
+        echo "  Nginx配置文件: $NGINX_CONF_FILE"
+        echo "  网站配置文件: $NGINX_CONF_DIR/conf.d/customer-data.conf"
+        echo "  Web目录: $WEB_DIR"
+        echo "  文件是否存在: $([ -f "$WEB_DIR/$FILE_NAME" ] && echo '是' || echo '否')"
+        echo ""
+        echo "请手动检查："
+        echo "  1. 查看Nginx错误日志: tail -20 /var/log/nginx/error.log"
+        echo "  2. 测试配置文件: $NGINX_BIN -t -c $NGINX_CONF_FILE"
+        echo "  3. 手动启动: $NGINX_BIN -c $NGINX_CONF_FILE"
     fi
 else
     echo ""
