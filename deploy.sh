@@ -98,10 +98,40 @@ if command -v apt-get &> /dev/null; then
             
             if command -v apt-get &> /dev/null; then
                 echo "使用apt-get安装编译工具..."
-                apt-get update 2>&1 | grep -v "404" | grep -v "Failed" | grep -v "Err:" | grep -v "Ign:" || true
-                apt-get install -y gcc make git 2>&1 | grep -v "404" | grep -v "Failed" | grep -v "Err:" | grep -v "Ign:" || {
-                    echo "警告：部分依赖安装可能失败，继续尝试..."
-                }
+                
+                UPDATE_OUTPUT=$(apt-get update 2>&1)
+                UPDATE_STATUS=$?
+                
+                if [ $UPDATE_STATUS -ne 0 ] || echo "$UPDATE_OUTPUT" | grep -q "does not have a Release file\|Unable to locate package"; then
+                    echo "软件源有问题，尝试修复..."
+                    DEBIAN_VERSION=$(lsb_release -cs 2>/dev/null || echo "buster")
+                    
+                    if [ -f /etc/apt/sources.list ]; then
+                        echo "备份当前sources.list..."
+                        cp /etc/apt/sources.list /etc/apt/sources.list.bak.$(date +%s) 2>/dev/null || true
+                        
+                        echo "配置archive.debian.org源（用于安装编译工具）..."
+                        cat > /etc/apt/sources.list <<EOF
+deb http://archive.debian.org/debian $DEBIAN_VERSION main
+deb http://archive.debian.org/debian $DEBIAN_VERSION-updates main
+deb http://archive.debian.org/debian-security $DEBIAN_VERSION/updates main
+EOF
+                        
+                        echo "更新软件包列表..."
+                        apt-get update 2>&1 | grep -v "404" | grep -v "Failed" | grep -v "Err:" | grep -v "Ign:" || true
+                    fi
+                fi
+                
+                echo "安装编译工具: gcc make git..."
+                INSTALL_OUTPUT=$(apt-get install -y gcc make git 2>&1)
+                INSTALL_STATUS=$?
+                
+                if [ $INSTALL_STATUS -eq 0 ]; then
+                    echo "编译工具安装完成"
+                else
+                    echo "安装输出: $INSTALL_OUTPUT" | grep -v "404" | grep -v "Failed" | grep -v "Err:" | grep -v "Ign:" || true
+                    echo "警告：部分依赖安装可能失败，继续检查..."
+                fi
             elif command -v yum &> /dev/null; then
                 echo "使用yum安装编译工具..."
                 yum install -y gcc make git 2>&1 || {
