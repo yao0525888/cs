@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "  客户数据管理系统 - Linux部署脚本1"
+echo "  客户数据管理系统 - Linux部署脚本"
 echo "=========================================="
 echo ""
 
@@ -15,6 +15,83 @@ if [ "$EUID" -ne 0 ]; then
     echo "错误：请使用sudo运行此脚本"
     exit 1
 fi
+
+echo "请选择操作："
+echo "1) 安装/部署"
+echo "2) 卸载"
+read -p "请输入选项 [1-2] (默认1): " action
+action=${action:-1}
+
+if [ "$action" = "2" ]; then
+    echo ""
+    echo "=========================================="
+    echo "  卸载Nginx和部署文件"
+    echo "=========================================="
+    echo ""
+    
+    echo "正在停止Nginx服务..."
+    systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || /etc/init.d/nginx stop 2>/dev/null || true
+    
+    echo "正在禁用Nginx服务..."
+    systemctl disable nginx 2>/dev/null || true
+    
+    echo "正在删除systemd服务文件..."
+    rm -f /etc/systemd/system/nginx.service
+    systemctl daemon-reload 2>/dev/null || true
+    
+    echo "正在删除Nginx配置文件..."
+    if [ -d "/etc/nginx" ]; then
+        rm -rf /etc/nginx/sites-available/customer-data 2>/dev/null || true
+        rm -f /etc/nginx/sites-enabled/customer-data 2>/dev/null || true
+        rm -f /etc/nginx/conf.d/customer-data.conf 2>/dev/null || true
+    fi
+    
+    echo "正在删除部署的网页文件..."
+    if [ -f "$WEB_DIR/$FILE_NAME" ]; then
+        rm -f "$WEB_DIR/$FILE_NAME"
+        echo "已删除: $WEB_DIR/$FILE_NAME"
+    fi
+    
+    echo ""
+    read -p "是否删除Nginx程序文件？[y/N]: " remove_nginx
+    if [[ $remove_nginx =~ ^[Yy]$ ]]; then
+        echo "正在删除Nginx程序..."
+        
+        if [ -d "/usr/local/nginx" ]; then
+            rm -rf /usr/local/nginx
+            echo "已删除: /usr/local/nginx"
+        fi
+        
+        rm -f /usr/local/bin/nginx 2>/dev/null || true
+        rm -f /usr/bin/nginx 2>/dev/null || true
+        
+        if command -v apt-get &> /dev/null; then
+            echo "正在卸载通过apt安装的Nginx..."
+            apt-get remove -y nginx nginx-common nginx-full 2>/dev/null || true
+            apt-get purge -y nginx nginx-common nginx-full 2>/dev/null || true
+        elif command -v yum &> /dev/null; then
+            echo "正在卸载通过yum安装的Nginx..."
+            yum remove -y nginx 2>/dev/null || true
+        elif command -v dnf &> /dev/null; then
+            echo "正在卸载通过dnf安装的Nginx..."
+            dnf remove -y nginx 2>/dev/null || true
+        fi
+    else
+        echo "保留Nginx程序文件"
+    fi
+    
+    echo ""
+    echo "=========================================="
+    echo "卸载完成！"
+    echo "=========================================="
+    exit 0
+fi
+
+echo ""
+echo "=========================================="
+echo "  开始安装部署"
+echo "=========================================="
+echo ""
 
 download_file() {
     local target_path=$1
@@ -92,6 +169,21 @@ if command -v apt-get &> /dev/null; then
         command -v make >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS make"
         command -v git >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS git"
         
+        PCRE_CHECK=false
+        if [ -f /usr/include/pcre.h ] || [ -f /usr/local/include/pcre.h ] || [ -f /usr/include/pcre/pcre.h ]; then
+            PCRE_CHECK=true
+        elif pkg-config --exists libpcre 2>/dev/null || pkg-config --exists libpcre2 2>/dev/null; then
+            PCRE_CHECK=true
+        fi
+        
+        if [ "$PCRE_CHECK" = false ]; then
+            if command -v apt-get &> /dev/null; then
+                MISSING_DEPS="$MISSING_DEPS libpcre3-dev"
+            elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+                MISSING_DEPS="$MISSING_DEPS pcre-devel"
+            fi
+        fi
+        
         if [ -n "$MISSING_DEPS" ]; then
             echo "缺少编译依赖: $MISSING_DEPS"
             echo "尝试自动安装编译依赖..."
@@ -122,8 +214,8 @@ EOF
                     fi
                 fi
                 
-                echo "安装编译工具: gcc make git..."
-                INSTALL_OUTPUT=$(apt-get install -y gcc make git 2>&1)
+                echo "安装编译工具: gcc make git libpcre3-dev zlib1g-dev..."
+                INSTALL_OUTPUT=$(apt-get install -y gcc make git libpcre3-dev zlib1g-dev 2>&1)
                 INSTALL_STATUS=$?
                 
                 if [ $INSTALL_STATUS -eq 0 ]; then
@@ -134,12 +226,12 @@ EOF
                 fi
             elif command -v yum &> /dev/null; then
                 echo "使用yum安装编译工具..."
-                yum install -y gcc make git 2>&1 || {
+                yum install -y gcc make git pcre-devel zlib-devel 2>&1 || {
                     echo "警告：部分依赖安装可能失败，继续尝试..."
                 }
             elif command -v dnf &> /dev/null; then
                 echo "使用dnf安装编译工具..."
-                dnf install -y gcc make git 2>&1 || {
+                dnf install -y gcc make git pcre-devel zlib-devel 2>&1 || {
                     echo "警告：部分依赖安装可能失败，继续尝试..."
                 }
             else
@@ -152,17 +244,32 @@ EOF
             command -v make >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS make"
             command -v git >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS git"
             
+            PCRE_CHECK=false
+            if [ -f /usr/include/pcre.h ] || [ -f /usr/local/include/pcre.h ] || [ -f /usr/include/pcre/pcre.h ]; then
+                PCRE_CHECK=true
+            elif pkg-config --exists libpcre 2>/dev/null || pkg-config --exists libpcre2 2>/dev/null; then
+                PCRE_CHECK=true
+            fi
+            
+            if [ "$PCRE_CHECK" = false ]; then
+                if command -v apt-get &> /dev/null; then
+                    MISSING_DEPS="$MISSING_DEPS libpcre3-dev"
+                elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+                    MISSING_DEPS="$MISSING_DEPS pcre-devel"
+                fi
+            fi
+            
             if [ -n "$MISSING_DEPS" ]; then
                 echo "错误：仍缺少编译依赖: $MISSING_DEPS"
                 echo "请手动安装这些工具后重新运行脚本"
                 echo ""
                 echo "安装命令："
                 if command -v apt-get &> /dev/null; then
-                    echo "  sudo apt-get install -y gcc make git"
+                    echo "  sudo apt-get install -y gcc make git libpcre3-dev zlib1g-dev"
                 elif command -v yum &> /dev/null; then
-                    echo "  sudo yum install -y gcc make git"
+                    echo "  sudo yum install -y gcc make git pcre-devel zlib-devel"
                 elif command -v dnf &> /dev/null; then
-                    echo "  sudo dnf install -y gcc make git"
+                    echo "  sudo dnf install -y gcc make git pcre-devel zlib-devel"
                 fi
                 exit 1
             else
@@ -176,11 +283,21 @@ EOF
         if git clone https://github.com/nginx/nginx.git 2>&1; then
             cd nginx
             
-            echo "配置编译选项（使用最简配置）..."
-            auto/configure --prefix=/usr/local/nginx --with-http_ssl_module 2>&1 || {
-                echo "使用默认配置..."
-                auto/configure --prefix=/usr/local/nginx 2>&1
-            }
+            echo "配置编译选项..."
+            if auto/configure --prefix=/usr/local/nginx --with-http_ssl_module 2>&1; then
+                echo "配置成功（包含SSL模块）"
+            else
+                echo "尝试不使用SSL模块..."
+                if auto/configure --prefix=/usr/local/nginx 2>&1; then
+                    echo "配置成功（基础配置）"
+                else
+                    echo "尝试禁用rewrite模块..."
+                    auto/configure --prefix=/usr/local/nginx --without-http_rewrite_module 2>&1 || {
+                        echo "配置失败，使用最简配置..."
+                        auto/configure --prefix=/usr/local/nginx --without-http_rewrite_module --without-http_ssl_module 2>&1
+                    }
+                fi
+            fi
             
             echo "编译Nginx..."
             if make -j$(nproc 2>/dev/null || echo 1) 2>&1; then
