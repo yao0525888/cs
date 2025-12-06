@@ -17,7 +17,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "请选择操作："
-echo "1) 安装"
+echo "1) 安装1"
 echo "2) 卸载"
 echo "3) 更新 default.html 文件"
 read -p "请输入选项 [1-3] (默认1): " action
@@ -604,6 +604,15 @@ server {
     root $WEB_DIR;
     index $FILE_NAME;
     
+    location /api/ {
+        proxy_pass http://127.0.0.1:7010;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        add_header Access-Control-Allow-Origin * always;
+    }
+    
     location / {
         try_files \$uri \$uri/ /$FILE_NAME;
     }
@@ -636,6 +645,15 @@ server {
     root $WEB_DIR;
     index $FILE_NAME;
     
+    location /api/ {
+        proxy_pass http://127.0.0.1:7010;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        add_header Access-Control-Allow-Origin * always;
+    }
+    
     location / {
         try_files \$uri \$uri/ /$FILE_NAME;
     }
@@ -662,6 +680,15 @@ server {
     
     root $WEB_DIR;
     index $FILE_NAME;
+    
+    location /api/ {
+        proxy_pass http://127.0.0.1:7010;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        add_header Access-Control-Allow-Origin * always;
+    }
     
     location / {
         try_files \$uri \$uri/ /$FILE_NAME;
