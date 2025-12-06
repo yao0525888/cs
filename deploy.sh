@@ -603,72 +603,42 @@ if [ -n "$NGINX_BIN" ] || command -v nginx &> /dev/null; then
     fi
     echo "启动Nginx服务..."
     if [ -n "$NGINX_BIN" ] && [ -d "/usr/local/nginx" ]; then
-        echo "停止现有Nginx进程..."
-        pkill nginx 2>/dev/null || true
-        sleep 2
-        
-        if [ -f "/etc/systemd/system/nginx.service" ]; then
-            echo "使用systemd启动..."
-            systemctl daemon-reload 2>/dev/null || true
-            systemctl stop nginx 2>/dev/null || true
-            sleep 1
-            systemctl start nginx 2>/dev/null || {
-                echo "systemd启动失败，尝试直接启动..."
-                $NGINX_BIN -c "$NGINX_CONF_FILE" 2>&1
-            }
-            systemctl enable nginx 2>/dev/null || true
+        if pgrep -x nginx > /dev/null; then
+            echo "Nginx已在运行，重新加载配置..."
+            if [ -f "/etc/systemd/system/nginx.service" ]; then
+                systemctl daemon-reload 2>/dev/null || true
+                systemctl reload nginx 2>/dev/null || $NGINX_BIN -s reload -c "$NGINX_CONF_FILE" 2>/dev/null || true
+            else
+                $NGINX_BIN -s reload -c "$NGINX_CONF_FILE" 2>/dev/null || true
+            fi
         else
-            echo "直接启动Nginx..."
-            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>&1 || {
-                echo "启动失败，错误信息："
-                $NGINX_BIN -c "$NGINX_CONF_FILE" -t 2>&1
-            }
+            if [ -f "/etc/systemd/system/nginx.service" ]; then
+                systemctl daemon-reload 2>/dev/null || true
+                systemctl start nginx 2>/dev/null || $NGINX_BIN -c "$NGINX_CONF_FILE" 2>/dev/null || true
+                systemctl enable nginx 2>/dev/null || true
+            else
+                $NGINX_BIN -c "$NGINX_CONF_FILE" 2>/dev/null || true
+            fi
         fi
     else
-        systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || /etc/init.d/nginx restart 2>/dev/null || true
-        systemctl enable nginx 2>/dev/null || true
+        if pgrep -x nginx > /dev/null; then
+            systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || true
+        else
+            systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
+            systemctl enable nginx 2>/dev/null || true
+        fi
     fi
     
-    sleep 3
+    sleep 2
     
-    echo "检查Nginx进程..."
     if pgrep -x nginx > /dev/null; then
-        echo "Nginx进程运行中 (PID: $(pgrep -x nginx | head -1))"
-    else
-        echo "警告：未检测到Nginx进程"
-        echo "尝试手动启动..."
-        if [ -n "$NGINX_BIN" ] && [ -f "$NGINX_CONF_FILE" ]; then
-            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>&1
-            sleep 2
+        if netstat -tuln 2>/dev/null | grep -q ":$PORT " || ss -tuln 2>/dev/null | grep -q ":$PORT "; then
+            echo "Nginx服务运行正常，端口 $PORT 已监听"
+        else
+            echo "Nginx服务运行中，但端口 $PORT 未监听，请检查配置"
         fi
-    fi
-    
-    echo "检查端口监听..."
-    PORT_LISTENING=false
-    if netstat -tuln 2>/dev/null | grep -q ":$PORT "; then
-        PORT_LISTENING=true
-        echo "端口 $PORT 正在监听 (netstat)"
-    elif ss -tuln 2>/dev/null | grep -q ":$PORT "; then
-        PORT_LISTENING=true
-        echo "端口 $PORT 正在监听 (ss)"
     else
-        echo "警告：端口 $PORT 未监听"
-        echo "当前监听的端口："
-        netstat -tuln 2>/dev/null | grep LISTEN | head -5 || ss -tuln 2>/dev/null | grep LISTEN | head -5 || echo "无法获取端口信息"
-    fi
-    
-    if [ "$PORT_LISTENING" = false ]; then
-        echo ""
-        echo "诊断信息："
-        echo "  Nginx配置文件: $NGINX_CONF_FILE"
-        echo "  网站配置文件: $NGINX_CONF_DIR/conf.d/customer-data.conf"
-        echo "  Web目录: $WEB_DIR"
-        echo "  文件是否存在: $([ -f "$WEB_DIR/$FILE_NAME" ] && echo '是' || echo '否')"
-        echo ""
-        echo "请手动检查："
-        echo "  1. 查看Nginx错误日志: tail -20 /var/log/nginx/error.log"
-        echo "  2. 测试配置文件: $NGINX_BIN -t -c $NGINX_CONF_FILE"
-        echo "  3. 手动启动: $NGINX_BIN -c $NGINX_CONF_FILE"
+        echo "警告：Nginx服务未运行"
     fi
 else
     echo ""
@@ -741,50 +711,6 @@ else
     echo "  http://$LOCAL_IP:$PORT/$FILE_NAME"
 fi
 
-echo ""
-echo "防火墙检查："
-FIREWALL_OK=false
-if command -v ufw &> /dev/null; then
-    if ufw status | grep -q "$PORT/tcp"; then
-        echo "  UFW防火墙: 端口 $PORT 已开放"
-        FIREWALL_OK=true
-    else
-        echo "  UFW防火墙: 端口 $PORT 未开放"
-        echo "  请运行: sudo ufw allow $PORT/tcp"
-    fi
-elif command -v firewall-cmd &> /dev/null; then
-    if firewall-cmd --list-ports 2>/dev/null | grep -q "$PORT"; then
-        echo "  Firewalld防火墙: 端口 $PORT 已开放"
-        FIREWALL_OK=true
-    else
-        echo "  Firewalld防火墙: 端口 $PORT 未开放"
-        echo "  请运行: sudo firewall-cmd --permanent --add-port=$PORT/tcp && sudo firewall-cmd --reload"
-    fi
-else
-    echo "  未检测到防火墙管理工具"
-    echo "  请手动检查iptables或其他防火墙配置"
-fi
-
-if [ "$FIREWALL_OK" = false ]; then
-    echo ""
-    echo "⚠️  警告：防火墙可能未正确配置，可能导致无法访问"
-fi
-
-echo ""
-echo "服务状态："
-if systemctl is-active --quiet nginx 2>/dev/null || pgrep -x nginx > /dev/null; then
-    echo "  Nginx服务: 运行中"
-else
-    echo "  Nginx服务: 未运行"
-    echo "  请检查: sudo systemctl status nginx"
-fi
-
-echo ""
-echo "如果无法访问，请检查："
-echo "  1. 防火墙是否开放端口 $PORT"
-echo "  2. 云服务器安全组是否开放端口 $PORT"
-echo "  3. Nginx服务是否正常运行"
-echo "  4. 服务器是否有公网IP"
 echo ""
 echo "=========================================="
 
