@@ -571,12 +571,82 @@ echo ""
 echo "=========================================="
 echo "部署完成！"
 echo ""
-SERVER_IP=$(hostname -I | awk '{print $1}')
-if [ -z "$SERVER_IP" ]; then
-    SERVER_IP=$(ip addr show | grep "inet " | grep -v 127.0.0.1 | head -1 | awk '{print $2}' | cut -d/ -f1)
+echo "正在获取服务器IP地址..."
+
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+if [ -z "$LOCAL_IP" ]; then
+    LOCAL_IP=$(ip addr show | grep "inet " | grep -v 127.0.0.1 | head -1 | awk '{print $2}' | cut -d/ -f1)
 fi
-echo "服务器IP地址: $SERVER_IP"
-echo "访问地址: http://$SERVER_IP:$PORT/$FILE_NAME"
+
+PUBLIC_IP=""
+if command -v curl &> /dev/null; then
+    PUBLIC_IP=$(curl -s --max-time 3 http://ifconfig.me 2>/dev/null || curl -s --max-time 3 http://icanhazip.com 2>/dev/null || curl -s --max-time 3 http://ip.sb 2>/dev/null || echo "")
+elif command -v wget &> /dev/null; then
+    PUBLIC_IP=$(wget -qO- --timeout=3 http://ifconfig.me 2>/dev/null || wget -qO- --timeout=3 http://icanhazip.com 2>/dev/null || echo "")
+fi
+
+echo ""
+echo "服务器信息："
+if [ -n "$PUBLIC_IP" ]; then
+    echo "  公网IP地址: $PUBLIC_IP"
+    echo ""
+    echo "访问地址: http://$PUBLIC_IP:$PORT/$FILE_NAME"
+else
+    echo "  无法获取公网IP地址"
+    echo ""
+    echo "提示：请检查："
+    echo "  1. 服务器是否有公网IP"
+    echo "  2. 网络连接是否正常"
+    echo "  3. 防火墙是否允许访问"
+    echo ""
+    echo "如果服务器只有内网IP，请使用内网地址访问："
+    echo "  http://$LOCAL_IP:$PORT/$FILE_NAME"
+fi
+
+echo ""
+echo "防火墙检查："
+FIREWALL_OK=false
+if command -v ufw &> /dev/null; then
+    if ufw status | grep -q "$PORT/tcp"; then
+        echo "  UFW防火墙: 端口 $PORT 已开放"
+        FIREWALL_OK=true
+    else
+        echo "  UFW防火墙: 端口 $PORT 未开放"
+        echo "  请运行: sudo ufw allow $PORT/tcp"
+    fi
+elif command -v firewall-cmd &> /dev/null; then
+    if firewall-cmd --list-ports 2>/dev/null | grep -q "$PORT"; then
+        echo "  Firewalld防火墙: 端口 $PORT 已开放"
+        FIREWALL_OK=true
+    else
+        echo "  Firewalld防火墙: 端口 $PORT 未开放"
+        echo "  请运行: sudo firewall-cmd --permanent --add-port=$PORT/tcp && sudo firewall-cmd --reload"
+    fi
+else
+    echo "  未检测到防火墙管理工具"
+    echo "  请手动检查iptables或其他防火墙配置"
+fi
+
+if [ "$FIREWALL_OK" = false ]; then
+    echo ""
+    echo "⚠️  警告：防火墙可能未正确配置，可能导致无法访问"
+fi
+
+echo ""
+echo "服务状态："
+if systemctl is-active --quiet nginx 2>/dev/null || pgrep -x nginx > /dev/null; then
+    echo "  Nginx服务: 运行中"
+else
+    echo "  Nginx服务: 未运行"
+    echo "  请检查: sudo systemctl status nginx"
+fi
+
+echo ""
+echo "如果无法访问，请检查："
+echo "  1. 防火墙是否开放端口 $PORT"
+echo "  2. 云服务器安全组是否开放端口 $PORT"
+echo "  3. Nginx服务是否正常运行"
+echo "  4. 服务器是否有公网IP"
 echo ""
 echo "=========================================="
 
