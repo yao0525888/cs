@@ -29,6 +29,12 @@ if [ "$action" = "2" ]; then
     echo "=========================================="
     echo ""
     
+    echo "正在停止API服务器..."
+    pkill -f "api_server.py" 2>/dev/null || true
+    
+    echo "正在停止API服务器..."
+    pkill -f "api_server.py" 2>/dev/null || true
+    
     echo "正在停止Nginx服务..."
     systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || /etc/init.d/nginx stop 2>/dev/null || true
     
@@ -50,6 +56,24 @@ if [ "$action" = "2" ]; then
     if [ -f "$WEB_DIR/$FILE_NAME" ]; then
         rm -f "$WEB_DIR/$FILE_NAME"
         echo "已删除: $WEB_DIR/$FILE_NAME"
+    fi
+    
+    echo "正在停止API服务器..."
+    pkill -f "api_server.py" 2>/dev/null || true
+    
+    echo "正在删除API服务器文件..."
+    if [ -f "$WEB_DIR/api_server.py" ]; then
+        rm -f "$WEB_DIR/api_server.py"
+    fi
+    
+    if [ -f "$WEB_DIR/data.json" ]; then
+        read -p "是否删除服务器上的数据文件 (data.json)？[y/N]: " remove_data_choice
+        if [[ $remove_data_choice =~ ^[Yy]$ ]]; then
+            rm -f "$WEB_DIR/data.json"
+            echo "数据文件已删除"
+        else
+            echo "数据文件已保留"
+        fi
     fi
     
     echo ""
@@ -674,6 +698,124 @@ fi
 
 echo ""
 echo "✅ Nginx部署完成！"
+
+echo ""
+echo "启动API服务器..."
+API_PORT="7010"
+API_SCRIPT="$WEB_DIR/api_server.py"
+
+if [ ! -f "$API_SCRIPT" ]; then
+    echo "创建API服务器脚本..."
+    cat > "$API_SCRIPT" <<'APISCRIPT'
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import json
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import sys
+
+DATA_FILE = '/var/www/html/data.json'
+
+class APIHandler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path == '/api/data':
+            try:
+                if os.path.exists(DATA_FILE):
+                    with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+                else:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps([], ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path == '/api/data':
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                
+                os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
+                with open(DATA_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'success': True}, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+def run(port=7010):
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, APIHandler)
+    httpd.serve_forever()
+
+if __name__ == '__main__':
+    port = 7010
+    if len(sys.argv) > 1:
+        port = int(sys.argv[1])
+    run(port)
+APISCRIPT
+    chmod +x "$API_SCRIPT"
+fi
+
+pkill -f "api_server.py" 2>/dev/null || true
+sleep 1
+
+if command -v python3 &> /dev/null; then
+    nohup python3 "$API_SCRIPT" "$API_PORT" > /dev/null 2>&1 &
+    sleep 2
+    if pgrep -f "api_server.py" > /dev/null; then
+        echo "API服务器已启动 (端口 $API_PORT)"
+    else
+        echo "警告：API服务器启动失败"
+    fi
+else
+    echo "警告：未找到python3，无法启动API服务器"
+fi
+
+if command -v ufw &> /dev/null; then
+    ufw allow $API_PORT/tcp 2>/dev/null || true
+elif command -v firewall-cmd &> /dev/null; then
+    firewall-cmd --permanent --add-port=$API_PORT/tcp 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+fi
 
 echo ""
 echo "=========================================="
