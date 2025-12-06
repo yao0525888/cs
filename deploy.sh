@@ -815,7 +815,6 @@ if [ ! -f "$API_SCRIPT" ]; then
     echo "创建API服务器脚本..."
     cat > "$API_SCRIPT" <<'APISCRIPT'
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 import json
 import os
@@ -823,67 +822,73 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import sys
 
 DATA_FILE = '/var/www/html/data.json'
+SETTINGS_FILE = '/var/www/html/settings.json'
+PASSWORD_FILE = '/var/www/html/password.json'
+
+def read_json_file(filepath, default):
+    if os.path.exists(filepath):
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return default
+
+def write_json_file(filepath, data):
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 class APIHandler(BaseHTTPRequestHandler):
-    def do_OPTIONS(self):
-        self.send_response(200)
+    def send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+
+    def do_OPTIONS(self):
+        self.send_json({}, 200)
 
     def do_GET(self):
         if self.path == '/api/data':
             try:
-                if os.path.exists(DATA_FILE):
-                    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/json; charset=utf-8')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
-                else:
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/json; charset=utf-8')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    self.wfile.write(json.dumps([], ensure_ascii=False).encode('utf-8'))
+                self.send_json(read_json_file(DATA_FILE, []))
             except Exception as e:
-                self.send_response(500)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
+                self.send_json({'error': str(e)}, 500)
+        elif self.path == '/api/settings':
+            try:
+                self.send_json(read_json_file(SETTINGS_FILE, {}))
+            except Exception as e:
+                self.send_json({'error': str(e)}, 500)
+        elif self.path == '/api/password':
+            try:
+                password_data = read_json_file(PASSWORD_FILE, {'password': 'admin', 'version': 0})
+                self.send_json({'password': password_data.get('password', 'admin'), 'version': password_data.get('version', 0)})
+            except Exception as e:
+                self.send_json({'error': str(e)}, 500)
         else:
             self.send_response(404)
             self.end_headers()
 
     def do_POST(self):
-        if self.path == '/api/data':
-            try:
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-                
-                os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-                with open(DATA_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', '*')
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = json.loads(self.rfile.read(content_length).decode('utf-8'))
+            if self.path == '/api/data':
+                write_json_file(DATA_FILE, post_data)
+                self.send_json({'success': True})
+            elif self.path == '/api/settings':
+                write_json_file(SETTINGS_FILE, post_data)
+                self.send_json({'success': True})
+            elif self.path == '/api/password':
+                password_data = read_json_file(PASSWORD_FILE, {'password': 'admin', 'version': 0})
+                password_data['password'] = post_data.get('password', password_data.get('password', 'admin'))
+                password_data['version'] = password_data.get('version', 0) + 1
+                write_json_file(PASSWORD_FILE, password_data)
+                self.send_json({'success': True, 'version': password_data['version']})
+            else:
+                self.send_response(404)
                 self.end_headers()
-                self.wfile.write(json.dumps({'success': True}, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                self.send_response(500)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'error': str(e)}, ensure_ascii=False).encode('utf-8'))
-        else:
-            self.send_response(404)
-            self.end_headers()
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
 
     def log_message(self, format, *args):
         pass
@@ -891,6 +896,7 @@ class APIHandler(BaseHTTPRequestHandler):
 def run(port=7010):
     server_address = ('', port)
     httpd = HTTPServer(server_address, APIHandler)
+    print(f'API服务器运行在端口 {port}')
     httpd.serve_forever()
 
 if __name__ == '__main__':
