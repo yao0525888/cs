@@ -17,7 +17,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "请选择操作："
-echo "1) 安装1"
+echo "1) 安装"
 echo "2) 卸载"
 echo "3) 更新 default.html 文件"
 read -p "请输入选项 [1-3] (默认1): " action
@@ -137,10 +137,11 @@ if [ "$action" = "2" ]; then
     echo ""
     
     echo "正在停止API服务器..."
+    systemctl stop customer-data-api.service 2>/dev/null || true
     pkill -f "api_server.py" 2>/dev/null || true
     
-    echo "正在停止API服务器..."
-    pkill -f "api_server.py" 2>/dev/null || true
+    echo "正在禁用API服务器服务..."
+    systemctl disable customer-data-api.service 2>/dev/null || true
     
     echo "正在停止Nginx服务..."
     systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || /etc/init.d/nginx stop 2>/dev/null || true
@@ -150,6 +151,7 @@ if [ "$action" = "2" ]; then
     
     echo "正在删除systemd服务文件..."
     rm -f /etc/systemd/system/nginx.service
+    rm -f /etc/systemd/system/customer-data-api.service
     systemctl daemon-reload 2>/dev/null || true
     
     echo "正在删除Nginx配置文件..."
@@ -164,9 +166,6 @@ if [ "$action" = "2" ]; then
         rm -f "$WEB_DIR/$FILE_NAME"
         echo "已删除: $WEB_DIR/$FILE_NAME"
     fi
-    
-    echo "正在停止API服务器..."
-    pkill -f "api_server.py" 2>/dev/null || true
     
     echo "正在删除API服务器文件..."
     if [ -f "$WEB_DIR/api_server.py" ]; then
@@ -939,12 +938,40 @@ pkill -f "api_server.py" 2>/dev/null || true
 sleep 1
 
 if command -v python3 &> /dev/null; then
-    nohup python3 "$API_SCRIPT" "$API_PORT" > /dev/null 2>&1 &
+    echo "创建API服务器systemd服务..."
+    cat > /etc/systemd/system/customer-data-api.service <<EOF
+[Unit]
+Description=Customer Data API Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$WEB_DIR
+ExecStart=/usr/bin/python3 $API_SCRIPT $API_PORT
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable customer-data-api.service
+    systemctl start customer-data-api.service
     sleep 2
-    if pgrep -f "api_server.py" > /dev/null; then
+    if systemctl is-active --quiet customer-data-api.service; then
         echo "API服务器已启动 (端口 $API_PORT)"
     else
-        echo "警告：API服务器启动失败"
+        echo "警告：API服务器启动失败，尝试使用nohup方式启动..."
+        nohup python3 "$API_SCRIPT" "$API_PORT" > /dev/null 2>&1 &
+        sleep 2
+        if pgrep -f "api_server.py" > /dev/null; then
+            echo "API服务器已启动 (端口 $API_PORT，nohup方式)"
+        else
+            echo "警告：API服务器启动失败"
+        fi
     fi
 else
     echo "警告：未找到python3，无法启动API服务器"
