@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "  客户数据管理系统 - Linux部署脚本1"
+echo "  客户数据管理系统 - Linux部署脚本"
 echo "=========================================="
 echo ""
 
@@ -18,24 +18,36 @@ fi
 
 download_file() {
     local target_path=$1
+    local target_dir=$(dirname "$target_path")
+    
+    if [ ! -d "$target_dir" ]; then
+        echo "创建目录: $target_dir"
+        mkdir -p "$target_dir"
+    fi
+    
     echo "正在从GitHub下载文件..."
     if command -v wget &> /dev/null; then
-        wget -q "$GITHUB_URL" -O "$target_path"
+        if wget -q "$GITHUB_URL" -O "$target_path"; then
+            if [ -f "$target_path" ] && [ -s "$target_path" ]; then
+                echo "文件下载成功"
+                return 0
+            fi
+        fi
     elif command -v curl &> /dev/null; then
-        curl -sL "$GITHUB_URL" -o "$target_path"
+        if curl -sL "$GITHUB_URL" -o "$target_path"; then
+            if [ -f "$target_path" ] && [ -s "$target_path" ]; then
+                echo "文件下载成功"
+                return 0
+            fi
+        fi
     else
         echo "错误：未找到wget或curl，无法下载文件"
         echo "请手动安装: sudo apt install wget 或 sudo yum install wget"
         return 1
     fi
     
-    if [ -f "$target_path" ] && [ -s "$target_path" ]; then
-        echo "文件下载成功"
-        return 0
-    else
-        echo "文件下载失败"
-        return 1
-    fi
+    echo "文件下载失败"
+    return 1
 }
 
 get_file() {
@@ -55,46 +67,53 @@ get_file() {
 
 echo "正在安装Nginx..."
 if command -v apt-get &> /dev/null; then
-    echo "更新软件包列表..."
-    apt-get update 2>&1 | grep -v "404  Not Found" || true
-    
     echo "检查Nginx是否已安装..."
     if command -v nginx &> /dev/null; then
-        echo "Nginx已安装，跳过安装步骤"
+        echo "Nginx已安装，版本: $(nginx -v 2>&1)"
     else
-        echo "安装Nginx..."
-        if ! apt-get install -y nginx 2>&1 | tee /tmp/nginx_install.log; then
-            echo "安装过程中出现错误，尝试使用--fix-missing选项..."
-            if ! apt-get install -y --fix-missing nginx 2>&1 | grep -v "404  Not Found"; then
-                echo "尝试仅从主源安装（跳过security源）..."
-                apt-get install -y -o Acquire::http::AllowRedirect=false nginx || {
-                    echo ""
-                    echo "=========================================="
-                    echo "安装Nginx时遇到软件源问题"
-                    echo "=========================================="
-                    echo "请尝试以下方法之一："
-                    echo ""
-                    echo "方法1：修复软件源"
-                    echo "  sudo sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
-                    echo "  sudo sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
-                    echo "  sudo apt-get update"
-                    echo "  sudo apt-get install -y nginx"
-                    echo ""
-                    echo "方法2：使用官方源"
-                    echo "  sudo sed -i 's/mirrors.tencentyun.com/deb.debian.org/g' /etc/apt/sources.list"
-                    echo "  sudo apt-get update"
-                    echo "  sudo apt-get install -y nginx"
-                    echo ""
-                    echo "方法3：手动安装（如果Nginx已部分安装）"
-                    echo "  检查Nginx是否可用: nginx -v"
-                    echo "  如果可用，可以继续部署"
-                    echo "=========================================="
-                    echo ""
-                    read -p "是否继续部署（如果Nginx已安装）？[y/N]: " continue_choice
-                    if [[ ! $continue_choice =~ ^[Yy]$ ]]; then
-                        exit 1
+        echo "更新软件包列表（忽略404错误）..."
+        apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" || true
+        
+        echo "安装Nginx（忽略缺失的包）..."
+        if apt-get install -y --fix-missing nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch"; then
+            echo "Nginx安装完成"
+        else
+            echo ""
+            echo "=========================================="
+            echo "Nginx安装遇到软件源问题"
+            echo "=========================================="
+            echo "正在尝试修复软件源..."
+            
+            if [ -f /etc/apt/sources.list ]; then
+                echo "备份当前sources.list..."
+                cp /etc/apt/sources.list /etc/apt/sources.list.bak
+                
+                echo "切换到阿里云镜像源..."
+                sed -i 's|mirrors.tencentyun.com|mirrors.aliyun.com|g' /etc/apt/sources.list
+                sed -i 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
+                
+                echo "更新软件包列表..."
+                apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" || true
+                
+                echo "重新尝试安装Nginx..."
+                if apt-get install -y nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch"; then
+                    echo "Nginx安装成功"
+                else
+                    echo "安装仍然失败，检查Nginx是否可用..."
+                    if command -v nginx &> /dev/null; then
+                        echo "Nginx已可用，继续部署"
+                    else
+                        echo ""
+                        echo "请手动安装Nginx："
+                        echo "  sudo apt-get update"
+                        echo "  sudo apt-get install -y nginx"
+                        echo ""
+                        read -p "是否继续部署（如果Nginx已安装）？[y/N]: " continue_choice
+                        if [[ ! $continue_choice =~ ^[Yy]$ ]]; then
+                            exit 1
+                        fi
                     fi
-                }
+                fi
             fi
         fi
     fi
@@ -107,12 +126,21 @@ else
     exit 1
 fi
 
+echo "确保Web目录存在..."
+if [ ! -d "$WEB_DIR" ]; then
+    echo "创建Web目录: $WEB_DIR"
+    mkdir -p "$WEB_DIR"
+fi
+
 echo "获取文件..."
 if ! get_file "$WEB_DIR/$FILE_NAME"; then
     echo "错误：无法获取文件"
+    echo "请检查网络连接或手动下载文件到: $WEB_DIR/$FILE_NAME"
     exit 1
 fi
-chown www-data:www-data "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown nginx:nginx "$WEB_DIR/$FILE_NAME" 2>/dev/null || true
+
+echo "设置文件权限..."
+chown www-data:www-data "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown nginx:nginx "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown root:root "$WEB_DIR/$FILE_NAME" 2>/dev/null || true
 chmod 644 "$WEB_DIR/$FILE_NAME"
 
 echo "配置Nginx..."
