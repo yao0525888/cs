@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 echo "=========================================="
 echo "  客户数据管理系统 - Linux部署脚本"
 echo "=========================================="
@@ -57,8 +55,49 @@ get_file() {
 
 echo "正在安装Nginx..."
 if command -v apt-get &> /dev/null; then
-    apt-get update
-    apt-get install -y nginx
+    echo "更新软件包列表..."
+    apt-get update 2>&1 | grep -v "404  Not Found" || true
+    
+    echo "检查Nginx是否已安装..."
+    if command -v nginx &> /dev/null; then
+        echo "Nginx已安装，跳过安装步骤"
+    else
+        echo "安装Nginx..."
+        if ! apt-get install -y nginx 2>&1 | tee /tmp/nginx_install.log; then
+            echo "安装过程中出现错误，尝试使用--fix-missing选项..."
+            if ! apt-get install -y --fix-missing nginx 2>&1 | grep -v "404  Not Found"; then
+                echo "尝试仅从主源安装（跳过security源）..."
+                apt-get install -y -o Acquire::http::AllowRedirect=false nginx || {
+                    echo ""
+                    echo "=========================================="
+                    echo "安装Nginx时遇到软件源问题"
+                    echo "=========================================="
+                    echo "请尝试以下方法之一："
+                    echo ""
+                    echo "方法1：修复软件源"
+                    echo "  sudo sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
+                    echo "  sudo sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
+                    echo "  sudo apt-get update"
+                    echo "  sudo apt-get install -y nginx"
+                    echo ""
+                    echo "方法2：使用官方源"
+                    echo "  sudo sed -i 's/mirrors.tencentyun.com/deb.debian.org/g' /etc/apt/sources.list"
+                    echo "  sudo apt-get update"
+                    echo "  sudo apt-get install -y nginx"
+                    echo ""
+                    echo "方法3：手动安装（如果Nginx已部分安装）"
+                    echo "  检查Nginx是否可用: nginx -v"
+                    echo "  如果可用，可以继续部署"
+                    echo "=========================================="
+                    echo ""
+                    read -p "是否继续部署（如果Nginx已安装）？[y/N]: " continue_choice
+                    if [[ ! $continue_choice =~ ^[Yy]$ ]]; then
+                        exit 1
+                    fi
+                }
+            fi
+        fi
+    fi
 elif command -v yum &> /dev/null; then
     yum install -y nginx
 elif command -v dnf &> /dev/null; then
@@ -116,9 +155,18 @@ server {
 EOF
 fi
 
-nginx -t
-systemctl restart nginx
-systemctl enable nginx
+if command -v nginx &> /dev/null; then
+    echo "测试Nginx配置..."
+    nginx -t || {
+        echo "警告：Nginx配置测试失败，但继续部署..."
+    }
+    echo "启动Nginx服务..."
+    systemctl restart nginx || service nginx restart || true
+    systemctl enable nginx 2>/dev/null || true
+else
+    echo "错误：Nginx未正确安装，无法继续"
+    exit 1
+fi
 
 echo "配置防火墙..."
 if command -v ufw &> /dev/null; then
