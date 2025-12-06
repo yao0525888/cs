@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "  客户数据管理系统 - Linux部署脚本"
+echo "  客户数据管理系统 - Linux部署脚本1"
 echo "=========================================="
 echo ""
 
@@ -95,17 +95,31 @@ if command -v apt-get &> /dev/null; then
                 echo "备份当前sources.list..."
                 cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
                 
-                echo "切换到阿里云镜像源..."
-                sed -i 's|mirrors.tencentyun.com|mirrors.aliyun.com|g' /etc/apt/sources.list
-                if [ -f /etc/apt/sources.list.d/debian-security.list ]; then
-                    sed -i 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian-security.list
-                fi
+                DEBIAN_VERSION=$(lsb_release -cs 2>/dev/null || echo "buster")
+                echo "检测到Debian版本: $DEBIAN_VERSION"
+                
+                echo "配置软件源（使用archive.debian.org，适用于旧版本）..."
+                cat > /etc/apt/sources.list <<EOF
+deb http://archive.debian.org/debian $DEBIAN_VERSION main
+deb http://archive.debian.org/debian $DEBIAN_VERSION-updates main
+deb http://archive.debian.org/debian-security $DEBIAN_VERSION/updates main
+EOF
                 
                 echo "更新软件包列表..."
-                apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" || true
+                if apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" | grep -v "Ign:"; then
+                    echo "软件包列表更新完成"
+                else
+                    echo "尝试使用其他镜像源..."
+                    cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian $DEBIAN_VERSION main
+deb http://deb.debian.org/debian $DEBIAN_VERSION-updates main
+deb http://security.debian.org/debian-security $DEBIAN_VERSION/updates main
+EOF
+                    apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" | grep -v "Ign:" || true
+                fi
                 
                 echo "重新尝试安装Nginx..."
-                if apt-get install -y nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:"; then
+                if apt-get install -y nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" | grep -v "Ign:"; then
                     if [ -d "/etc/nginx" ] && command -v nginx &> /dev/null; then
                         echo "Nginx安装成功"
                         NGINX_INSTALLED=true
@@ -118,21 +132,38 @@ if command -v apt-get &> /dev/null; then
                 echo "=========================================="
                 echo "Nginx安装失败"
                 echo "=========================================="
+                DEBIAN_VERSION=$(lsb_release -cs 2>/dev/null || echo "buster")
+                echo "检测到Debian版本: $DEBIAN_VERSION"
+                echo ""
                 echo "请手动执行以下命令安装Nginx："
                 echo ""
-                echo "1. 修复软件源："
-                echo "   sudo sed -i 's/mirrors.tencentyun.com/mirrors.aliyun.com/g' /etc/apt/sources.list"
-                echo "   sudo sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
+                echo "方法1：使用archive.debian.org（推荐，适用于Debian 10及以下）"
+                echo "   sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak"
+                echo "   sudo cat > /etc/apt/sources.list <<'EOF'"
+                echo "   deb http://archive.debian.org/debian $DEBIAN_VERSION main"
+                echo "   deb http://archive.debian.org/debian $DEBIAN_VERSION-updates main"
+                echo "   deb http://archive.debian.org/debian-security $DEBIAN_VERSION/updates main"
+                echo "   EOF"
                 echo "   sudo apt-get update"
-                echo ""
-                echo "2. 安装Nginx："
                 echo "   sudo apt-get install -y nginx"
                 echo ""
-                echo "3. 验证安装："
+                echo "方法2：使用官方源"
+                echo "   sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak"
+                echo "   sudo cat > /etc/apt/sources.list <<'EOF'"
+                echo "   deb http://deb.debian.org/debian $DEBIAN_VERSION main"
+                echo "   deb http://deb.debian.org/debian $DEBIAN_VERSION-updates main"
+                echo "   deb http://security.debian.org/debian-security $DEBIAN_VERSION/updates main"
+                echo "   EOF"
+                echo "   sudo apt-get update"
+                echo "   sudo apt-get install -y nginx"
+                echo ""
+                echo "方法3：如果上述方法都失败，可以尝试编译安装或使用Docker"
+                echo ""
+                echo "验证安装："
                 echo "   nginx -v"
                 echo "   ls -la /etc/nginx"
                 echo ""
-                echo "4. 重新运行部署脚本："
+                echo "安装成功后，重新运行部署脚本："
                 echo "   sudo bash deploy.sh"
                 echo ""
                 echo "=========================================="
