@@ -74,101 +74,158 @@ if command -v apt-get &> /dev/null; then
         echo "Nginx已安装，版本: $(nginx -v 2>&1)"
         NGINX_INSTALLED=true
     else
-        echo "更新软件包列表..."
-        apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" || true
+        echo ""
+        echo "=========================================="
+        echo "从GitHub源码编译安装Nginx"
+        echo "=========================================="
+        echo ""
+        echo "开始从GitHub源码编译安装Nginx..."
         
-        echo "安装Nginx..."
-        INSTALL_OUTPUT=$(apt-get install -y --fix-missing nginx 2>&1)
-        INSTALL_STATUS=$?
+        BUILD_DIR="/tmp/nginx-build"
+        rm -rf "$BUILD_DIR"
+        mkdir -p "$BUILD_DIR"
+        cd "$BUILD_DIR"
         
-        if [ $INSTALL_STATUS -eq 0 ] && [ -d "/etc/nginx" ] && command -v nginx &> /dev/null; then
-            echo "Nginx安装成功"
-            NGINX_INSTALLED=true
-        else
-            echo ""
-            echo "=========================================="
-            echo "Nginx安装遇到软件源问题"
-            echo "=========================================="
-            echo "正在尝试修复软件源..."
+        echo "检查编译依赖..."
+        MISSING_DEPS=""
+        command -v gcc >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS gcc"
+        command -v make >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS make"
+        command -v git >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS git"
+        
+        if [ -n "$MISSING_DEPS" ]; then
+            echo "缺少编译依赖: $MISSING_DEPS"
+            echo "尝试自动安装编译依赖..."
             
-            if [ -f /etc/apt/sources.list ]; then
-                echo "备份当前sources.list..."
-                cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
-                
-                DEBIAN_VERSION=$(lsb_release -cs 2>/dev/null || echo "buster")
-                echo "检测到Debian版本: $DEBIAN_VERSION"
-                
-                echo "配置软件源（使用archive.debian.org，适用于旧版本）..."
-                cat > /etc/apt/sources.list <<EOF
-deb http://archive.debian.org/debian $DEBIAN_VERSION main
-deb http://archive.debian.org/debian $DEBIAN_VERSION-updates main
-deb http://archive.debian.org/debian-security $DEBIAN_VERSION/updates main
-EOF
-                
-                echo "更新软件包列表..."
-                if apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" | grep -v "Ign:"; then
-                    echo "软件包列表更新完成"
-                else
-                    echo "尝试使用其他镜像源..."
-                    cat > /etc/apt/sources.list <<EOF
-deb http://deb.debian.org/debian $DEBIAN_VERSION main
-deb http://deb.debian.org/debian $DEBIAN_VERSION-updates main
-deb http://security.debian.org/debian-security $DEBIAN_VERSION/updates main
-EOF
-                    apt-get update 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" | grep -v "Ign:" || true
+            if command -v apt-get &> /dev/null; then
+                echo "使用apt-get安装编译工具..."
+                apt-get update 2>&1 | grep -v "404" | grep -v "Failed" | grep -v "Err:" | grep -v "Ign:" || true
+                apt-get install -y gcc make git 2>&1 | grep -v "404" | grep -v "Failed" | grep -v "Err:" | grep -v "Ign:" || {
+                    echo "警告：部分依赖安装可能失败，继续尝试..."
+                }
+            elif command -v yum &> /dev/null; then
+                echo "使用yum安装编译工具..."
+                yum install -y gcc make git 2>&1 || {
+                    echo "警告：部分依赖安装可能失败，继续尝试..."
+                }
+            elif command -v dnf &> /dev/null; then
+                echo "使用dnf安装编译工具..."
+                dnf install -y gcc make git 2>&1 || {
+                    echo "警告：部分依赖安装可能失败，继续尝试..."
+                }
+            else
+                echo "未找到包管理器，无法自动安装依赖"
+            fi
+            
+            echo "重新检查编译依赖..."
+            MISSING_DEPS=""
+            command -v gcc >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS gcc"
+            command -v make >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS make"
+            command -v git >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS git"
+            
+            if [ -n "$MISSING_DEPS" ]; then
+                echo "错误：仍缺少编译依赖: $MISSING_DEPS"
+                echo "请手动安装这些工具后重新运行脚本"
+                echo ""
+                echo "安装命令："
+                if command -v apt-get &> /dev/null; then
+                    echo "  sudo apt-get install -y gcc make git"
+                elif command -v yum &> /dev/null; then
+                    echo "  sudo yum install -y gcc make git"
+                elif command -v dnf &> /dev/null; then
+                    echo "  sudo dnf install -y gcc make git"
                 fi
+                exit 1
+            else
+                echo "编译依赖安装成功"
+            fi
+        else
+            echo "编译依赖已满足"
+        fi
+        
+        echo "克隆Nginx源码..."
+        if git clone https://github.com/nginx/nginx.git 2>&1; then
+            cd nginx
+            
+            echo "配置编译选项（使用最简配置）..."
+            auto/configure --prefix=/usr/local/nginx --with-http_ssl_module 2>&1 || {
+                echo "使用默认配置..."
+                auto/configure --prefix=/usr/local/nginx 2>&1
+            }
+            
+            echo "编译Nginx..."
+            if make -j$(nproc 2>/dev/null || echo 1) 2>&1; then
+                echo "安装Nginx..."
+                make install 2>&1
                 
-                echo "重新尝试安装Nginx..."
-                if apt-get install -y nginx 2>&1 | grep -v "404  Not Found" | grep -v "Failed to fetch" | grep -v "Err:" | grep -v "Ign:"; then
-                    if [ -d "/etc/nginx" ] && command -v nginx &> /dev/null; then
-                        echo "Nginx安装成功"
+                if [ -f "/usr/local/nginx/sbin/nginx" ]; then
+                    echo "创建符号链接..."
+                    ln -sf /usr/local/nginx/sbin/nginx /usr/local/bin/nginx 2>/dev/null || true
+                    ln -sf /usr/local/nginx/sbin/nginx /usr/bin/nginx 2>/dev/null || true
+                    
+                    echo "创建必要的目录..."
+                    mkdir -p /etc/nginx/conf.d
+                    mkdir -p /var/log/nginx
+                    mkdir -p /var/cache/nginx
+                    
+                    echo "创建systemd服务文件..."
+                    cat > /etc/systemd/system/nginx.service <<'EOF'
+[Unit]
+Description=The nginx HTTP and reverse proxy server
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=forking
+PIDFile=/var/run/nginx.pid
+ExecStartPre=/usr/local/nginx/sbin/nginx -t
+ExecStart=/usr/local/nginx/sbin/nginx
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=5
+KillMode=process
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                    
+                    systemctl daemon-reload
+                    
+                    if [ -f "/usr/local/nginx/sbin/nginx" ] || command -v nginx &> /dev/null; then
+                        echo "Nginx编译安装成功"
                         NGINX_INSTALLED=true
                     fi
                 fi
+            else
+                echo "编译失败，请检查错误信息"
             fi
             
-            if [ "$NGINX_INSTALLED" = false ]; then
-                echo ""
-                echo "=========================================="
-                echo "Nginx安装失败"
-                echo "=========================================="
-                DEBIAN_VERSION=$(lsb_release -cs 2>/dev/null || echo "buster")
-                echo "检测到Debian版本: $DEBIAN_VERSION"
-                echo ""
-                echo "请手动执行以下命令安装Nginx："
-                echo ""
-                echo "方法1：使用archive.debian.org（推荐，适用于Debian 10及以下）"
-                echo "   sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak"
-                echo "   sudo cat > /etc/apt/sources.list <<'EOF'"
-                echo "   deb http://archive.debian.org/debian $DEBIAN_VERSION main"
-                echo "   deb http://archive.debian.org/debian $DEBIAN_VERSION-updates main"
-                echo "   deb http://archive.debian.org/debian-security $DEBIAN_VERSION/updates main"
-                echo "   EOF"
-                echo "   sudo apt-get update"
-                echo "   sudo apt-get install -y nginx"
-                echo ""
-                echo "方法2：使用官方源"
-                echo "   sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak"
-                echo "   sudo cat > /etc/apt/sources.list <<'EOF'"
-                echo "   deb http://deb.debian.org/debian $DEBIAN_VERSION main"
-                echo "   deb http://deb.debian.org/debian $DEBIAN_VERSION-updates main"
-                echo "   deb http://security.debian.org/debian-security $DEBIAN_VERSION/updates main"
-                echo "   EOF"
-                echo "   sudo apt-get update"
-                echo "   sudo apt-get install -y nginx"
-                echo ""
-                echo "方法3：如果上述方法都失败，可以尝试编译安装或使用Docker"
-                echo ""
-                echo "验证安装："
-                echo "   nginx -v"
-                echo "   ls -la /etc/nginx"
-                echo ""
-                echo "安装成功后，重新运行部署脚本："
-                echo "   sudo bash deploy.sh"
-                echo ""
-                echo "=========================================="
-                exit 1
-            fi
+            cd /
+            rm -rf "$BUILD_DIR"
+        else
+            echo "克隆源码失败，请检查网络连接和git是否安装"
+            exit 1
+        fi
+        
+        if [ "$NGINX_INSTALLED" = false ]; then
+            echo ""
+            echo "=========================================="
+            echo "Nginx编译安装失败"
+            echo "=========================================="
+            echo "请检查："
+            echo "1. 网络连接是否正常"
+            echo "2. 是否安装了编译工具（gcc, make, git）"
+            echo "3. 是否有足够的磁盘空间"
+            echo ""
+            echo "手动编译安装命令："
+            echo "   cd /tmp"
+            echo "   git clone https://github.com/nginx/nginx.git"
+            echo "   cd nginx"
+            echo "   auto/configure --prefix=/usr/local/nginx --with-http_ssl_module"
+            echo "   make"
+            echo "   sudo make install"
+            echo ""
+            echo "=========================================="
+            exit 1
         fi
     fi
 elif command -v yum &> /dev/null; then
@@ -199,6 +256,17 @@ chmod 644 "$WEB_DIR/$FILE_NAME"
 
 echo "配置Nginx..."
 if [ ! -d "/etc/nginx" ]; then
+    if [ -d "/usr/local/nginx" ]; then
+        echo "检测到从源码安装的Nginx，创建配置目录..."
+        mkdir -p /etc/nginx/conf.d
+        if [ ! -f "/etc/nginx/nginx.conf" ]; then
+            if [ -f "/usr/local/nginx/conf/nginx.conf" ]; then
+                cp /usr/local/nginx/conf/nginx.conf /etc/nginx/nginx.conf
+            else
+                echo "警告：未找到nginx.conf配置文件"
+            fi
+        fi
+    else
     echo ""
     echo "=========================================="
     echo "错误：/etc/nginx 目录不存在"
@@ -216,6 +284,7 @@ if [ ! -d "/etc/nginx" ]; then
     echo "3. 重新运行部署脚本"
     echo "=========================================="
     exit 1
+    fi
 fi
 
 if [ -d "/etc/nginx/sites-available" ]; then
@@ -272,10 +341,37 @@ EOF
 fi
 
 echo "检查Nginx是否可用..."
+NGINX_BIN=""
 if command -v nginx &> /dev/null; then
-    echo "Nginx已安装: $(nginx -v 2>&1)"
+    NGINX_BIN=$(which nginx)
+elif [ -f "/usr/local/nginx/sbin/nginx" ]; then
+    NGINX_BIN="/usr/local/nginx/sbin/nginx"
+    ln -sf "$NGINX_BIN" /usr/local/bin/nginx 2>/dev/null || true
+    ln -sf "$NGINX_BIN" /usr/bin/nginx 2>/dev/null || true
+fi
+
+if [ -n "$NGINX_BIN" ] || command -v nginx &> /dev/null; then
+    if [ -n "$NGINX_BIN" ]; then
+        echo "Nginx已安装: $($NGINX_BIN -v 2>&1)"
+    else
+        echo "Nginx已安装: $(nginx -v 2>&1)"
+    fi
     echo "测试Nginx配置..."
-    if nginx -t 2>&1; then
+    if [ -n "$NGINX_BIN" ]; then
+        if $NGINX_BIN -t 2>&1; then
+            CONFIG_TEST=true
+        else
+            CONFIG_TEST=false
+        fi
+    else
+        if nginx -t 2>&1; then
+            CONFIG_TEST=true
+        else
+            CONFIG_TEST=false
+        fi
+    fi
+    
+    if [ "$CONFIG_TEST" = true ]; then
         echo "Nginx配置测试通过"
     else
         echo "警告：Nginx配置测试失败，但继续部署..."
