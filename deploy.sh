@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "  客户数据管理系统 - Linux部署脚本"
+echo "  客户数据管理系统 - Linux部署脚本1"
 echo "=========================================="
 echo ""
 
@@ -144,7 +144,16 @@ chown www-data:www-data "$WEB_DIR/$FILE_NAME" 2>/dev/null || chown nginx:nginx "
 chmod 644 "$WEB_DIR/$FILE_NAME"
 
 echo "配置Nginx..."
+if [ ! -d "/etc/nginx" ]; then
+    echo "错误：/etc/nginx 目录不存在，Nginx可能未正确安装"
+    echo "请手动安装Nginx: sudo apt-get install -y nginx"
+    exit 1
+fi
+
 if [ -d "/etc/nginx/sites-available" ]; then
+    if [ ! -d "/etc/nginx/sites-enabled" ]; then
+        mkdir -p /etc/nginx/sites-enabled
+    fi
     cat > /etc/nginx/sites-available/customer-data <<EOF
 server {
     listen $PORT;
@@ -168,6 +177,9 @@ server {
 EOF
     ln -sf /etc/nginx/sites-available/customer-data /etc/nginx/sites-enabled/
 else
+    if [ ! -d "/etc/nginx/conf.d" ]; then
+        mkdir -p /etc/nginx/conf.d
+    fi
     cat > /etc/nginx/conf.d/customer-data.conf <<EOF
 server {
     listen $PORT;
@@ -179,20 +191,57 @@ server {
     location / {
         try_files \$uri \$uri/ /$FILE_NAME;
     }
+    
+    location ~* \.(html|css|js|json)$ {
+        expires 1h;
+        add_header Cache-Control "public";
+    }
+    
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
 }
 EOF
 fi
 
+echo "检查Nginx是否可用..."
 if command -v nginx &> /dev/null; then
+    echo "Nginx已安装: $(nginx -v 2>&1)"
     echo "测试Nginx配置..."
-    nginx -t || {
+    if nginx -t 2>&1; then
+        echo "Nginx配置测试通过"
+    else
         echo "警告：Nginx配置测试失败，但继续部署..."
-    }
+    fi
     echo "启动Nginx服务..."
-    systemctl restart nginx || service nginx restart || true
+    systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || /etc/init.d/nginx restart 2>/dev/null || true
     systemctl enable nginx 2>/dev/null || true
+    sleep 2
+    if systemctl is-active --quiet nginx || pgrep -x nginx > /dev/null; then
+        echo "Nginx服务运行正常"
+    else
+        echo "警告：Nginx服务可能未启动，请手动检查"
+    fi
 else
-    echo "错误：Nginx未正确安装，无法继续"
+    echo ""
+    echo "=========================================="
+    echo "错误：Nginx未正确安装"
+    echo "=========================================="
+    echo "由于软件源问题，Nginx安装失败"
+    echo ""
+    echo "请手动执行以下命令安装Nginx："
+    echo ""
+    echo "1. 修复软件源："
+    echo "   sudo sed -i 's/mirrors.tencentyun.com/mirrors.aliyun.com/g' /etc/apt/sources.list"
+    echo "   sudo sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list"
+    echo "   sudo apt-get update"
+    echo ""
+    echo "2. 安装Nginx："
+    echo "   sudo apt-get install -y nginx"
+    echo ""
+    echo "3. 重新运行部署脚本："
+    echo "   sudo bash deploy.sh"
+    echo ""
+    echo "=========================================="
     exit 1
 fi
 
