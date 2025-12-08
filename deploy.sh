@@ -19,7 +19,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "请选择操作："
-echo "1) 安装"
+echo "1) 安装1"
 echo "2) 卸载"
 echo "3) 更新 default.html 文件"
 echo "4) 申请/更新HTTPS证书"
@@ -298,8 +298,8 @@ EOF
     rm -f "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" "$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf" 2>/dev/null || true
     ACME_CONF="$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf"
     cat > "$ACME_CONF" <<EOF
-server {
-    listen 80 default_server;
+ server {
+    listen 80;
     server_name $DOMAIN_INPUT;
     root $WEB_DIR;
     location /.well-known/acme-challenge/ {
