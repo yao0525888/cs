@@ -205,6 +205,35 @@ if [ "$action" = "4" ]; then
         echo "错误：Nginx未启用SSL模块，无法配置HTTPS"
         exit 1
     fi
+
+    setup_nginx_service() {
+        if [ -f "/etc/systemd/system/nginx.service" ]; then
+            return 0
+        fi
+        if [ -x "/usr/local/nginx/sbin/nginx" ]; then
+            cat > /etc/systemd/system/nginx.service <<'EOF'
+[Unit]
+Description=The nginx HTTP and reverse proxy server
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=forking
+PIDFile=/usr/local/nginx/logs/nginx.pid
+ExecStartPre=/usr/local/nginx/sbin/nginx -t -c /usr/local/nginx/conf/nginx.conf
+ExecStart=/usr/local/nginx/sbin/nginx -c /usr/local/nginx/conf/nginx.conf
+ExecReload=/usr/local/nginx/sbin/nginx -s reload
+ExecStop=/usr/local/nginx/sbin/nginx -s quit
+TimeoutStopSec=5
+KillMode=process
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload 2>/dev/null || true
+            systemctl enable nginx 2>/dev/null || true
+        fi
+    }
     
     if [ ! -d "$WEB_DIR" ] || [ ! -f "$WEB_DIR/$FILE_NAME" ]; then
         echo "错误：未找到已部署的网页文件，请先完成安装（选项1）"
@@ -250,7 +279,6 @@ if [ "$action" = "4" ]; then
     echo "创建ACME验证配置（80端口）..."
     mkdir -p "$NGINX_CONF_DIR/conf.d"
     mkdir -p "$WEB_DIR/.well-known/acme-challenge"
-    # 避免旧配置或重复 default_server，先清理已有 ACME 配置
     rm -f "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" "$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf" 2>/dev/null || true
     ACME_CONF="$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf"
     cat > "$ACME_CONF" <<EOF
@@ -342,7 +370,6 @@ EOF
     fi
     
     echo "创建HTTPS站点配置（443端口）..."
-    # 同步清理旧的 HTTPS/明文 7009 配置，确保7009仅走SSL
     rm -f "$NGINX_CONF_DIR/conf.d/customer-data-ssl.conf" "$NGINX_CONF_DIR/conf.d/01-customer-data-ssl.conf" "$NGINX_CONF_DIR/conf.d/customer-data.conf" "$NGINX_CONF_DIR/conf.d/customer-data.conf.http.bak" 2>/dev/null || true
     SSL_CONF="$NGINX_CONF_DIR/conf.d/01-customer-data-ssl.conf"
     cat > "$SSL_CONF" <<EOF
@@ -407,6 +434,7 @@ EOF
     fi
     
     echo "重新加载Nginx以启用HTTPS..."
+    setup_nginx_service
     if pgrep -x nginx > /dev/null; then
         systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || { [ -n "$NGINX_BIN" ] && $NGINX_BIN -s reload 2>/dev/null; } || true
     else
@@ -915,7 +943,6 @@ NGINXMAIN
                 sed -i '/http {/a\    include '"$NGINX_CONF_DIR"'/conf.d/*.conf;' "$NGINX_CONF_FILE"
             fi
         fi
-        # 兜底：若未包含conf.d，直接追加到http块末尾
         if ! grep -q "include $NGINX_CONF_DIR/conf.d/\*.conf;" "$NGINX_CONF_FILE" 2>/dev/null; then
             perl -0777 -i -pe 's|(http\s*\{)|$1\n    include '"$NGINX_CONF_DIR"'/conf.d/\*.conf;|m' "$NGINX_CONF_FILE"
         fi
