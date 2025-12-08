@@ -234,6 +234,22 @@ EOF
             systemctl enable nginx 2>/dev/null || true
         fi
     }
+
+    manage_nginx_with_systemd() {
+        # 如果已有 systemd 管控实例，优先重载
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || true
+            return 0
+        fi
+        # 如果有手工启动的 nginx 占用端口，先停掉
+        if pgrep -x nginx > 0 2>/dev/null; then
+            pkill -9 nginx 2>/dev/null || true
+        fi
+        rm -f /usr/local/nginx/logs/nginx.pid /var/run/nginx.pid
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl enable nginx 2>/dev/null || true
+        systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
+    }
     
     if [ ! -d "$WEB_DIR" ] || [ ! -f "$WEB_DIR/$FILE_NAME" ]; then
         echo "错误：未找到已部署的网页文件，请先完成安装（选项1）"
@@ -435,14 +451,7 @@ EOF
     
     echo "重新加载Nginx以启用HTTPS..."
     setup_nginx_service
-    if pgrep -x nginx > /dev/null; then
-        systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || { [ -n "$NGINX_BIN" ] && $NGINX_BIN -s reload 2>/dev/null; } || true
-    else
-        if [ -n "$NGINX_BIN" ]; then
-            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>/dev/null || true
-        fi
-        systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
-    fi
+    manage_nginx_with_systemd
     
     echo "开放80/443端口（如有防火墙）..."
     if command -v ufw &> /dev/null; then
