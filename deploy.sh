@@ -144,6 +144,68 @@ if [ "$action" = "4" ]; then
         exit 1
     fi
     
+    ensure_ssl_module() {
+        if [ -n "$NGINX_BIN" ] && $NGINX_BIN -V 2>&1 | grep -q "http_ssl_module"; then
+            return 0
+        fi
+        echo "检测到当前Nginx未启用SSL模块，尝试自动编译启用SSL..."
+        BUILD_DIR="/tmp/nginx-build-ssl"
+        rm -rf "$BUILD_DIR"
+        mkdir -p "$BUILD_DIR"
+        cd "$BUILD_DIR"
+
+        MISSING_DEPS=""
+        command -v gcc >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS gcc"
+        command -v make >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS make"
+        command -v git >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS git"
+        OPENSSL_CHECK=false
+        if [ -f /usr/include/openssl/ssl.h ] || [ -f /usr/local/include/openssl/ssl.h ]; then
+            OPENSSL_CHECK=true
+        fi
+        if [ "$OPENSSL_CHECK" = false ]; then
+            if command -v apt-get &> /dev/null; then
+                MISSING_DEPS="$MISSING_DEPS libssl-dev"
+            elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+                MISSING_DEPS="$MISSING_DEPS openssl-devel"
+            fi
+        fi
+        if [ -n "$MISSING_DEPS" ]; then
+            echo "安装SSL编译依赖: $MISSING_DEPS"
+            if command -v apt-get &> /dev/null; then
+                apt-get update -y 2>/dev/null || true
+                apt-get install -y $MISSING_DEPS 2>/dev/null || true
+            elif command -v yum &> /dev/null; then
+                yum install -y $MISSING_DEPS 2>/dev/null || true
+            elif command -v dnf &> /dev_null; then
+                dnf install -y $MISSING_DEPS 2>/dev/null || true
+            fi
+        fi
+
+        if git clone https://github.com/nginx/nginx.git 2>/dev/null; then
+            cd nginx
+            if auto/configure --prefix=/usr/local/nginx --with-http_ssl_module >/dev/null 2>&1; then
+                if make -j$(nproc 2>/dev/null || echo 1) >/dev/null 2>&1 && make install >/dev/null 2>&1; then
+                    if [ -f "/usr/local/nginx/sbin/nginx" ]; then
+                        ln -sf /usr/local/nginx/sbin/nginx /usr/local/bin/nginx 2>/dev/null || true
+                        ln -sf /usr/local/nginx/sbin/nginx /usr/bin/nginx 2>/dev/null || true
+                        cd /
+                        rm -rf "$BUILD_DIR"
+                        NGINX_BIN="/usr/local/nginx/sbin/nginx"
+                        echo "Nginx已重新编译并启用SSL模块"
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+        echo "自动编译启用SSL失败，请手动确保安装带http_ssl_module的Nginx"
+        return 1
+    }
+
+    if ! ensure_ssl_module; then
+        echo "错误：Nginx未启用SSL模块，无法配置HTTPS"
+        exit 1
+    fi
+    
     if [ ! -d "$WEB_DIR" ] || [ ! -f "$WEB_DIR/$FILE_NAME" ]; then
         echo "错误：未找到已部署的网页文件，请先完成安装（选项1）"
         exit 1
@@ -561,6 +623,19 @@ if command -v apt-get &> /dev/null; then
                 MISSING_DEPS="$MISSING_DEPS pcre-devel"
             fi
         fi
+
+        # 检查OpenSSL头文件
+        OPENSSL_CHECK=false
+        if [ -f /usr/include/openssl/ssl.h ] || [ -f /usr/local/include/openssl/ssl.h ]; then
+            OPENSSL_CHECK=true
+        fi
+        if [ "$OPENSSL_CHECK" = false ]; then
+            if command -v apt-get &> /dev/null; then
+                MISSING_DEPS="$MISSING_DEPS libssl-dev"
+            elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+                MISSING_DEPS="$MISSING_DEPS openssl-devel"
+            fi
+        fi
         
         if [ -n "$MISSING_DEPS" ]; then
             echo "缺少编译依赖: $MISSING_DEPS"
@@ -592,8 +667,8 @@ EOF
                     fi
                 fi
                 
-                echo "安装编译工具: gcc make git libpcre3-dev zlib1g-dev..."
-                INSTALL_OUTPUT=$(apt-get install -y gcc make git libpcre3-dev zlib1g-dev 2>&1)
+                echo "安装编译工具: gcc make git libpcre3-dev zlib1g-dev libssl-dev..."
+                INSTALL_OUTPUT=$(apt-get install -y gcc make git libpcre3-dev zlib1g-dev libssl-dev 2>&1)
                 INSTALL_STATUS=$?
                 
                 if [ $INSTALL_STATUS -eq 0 ]; then
@@ -604,12 +679,12 @@ EOF
                 fi
             elif command -v yum &> /dev/null; then
                 echo "使用yum安装编译工具..."
-                yum install -y gcc make git pcre-devel zlib-devel 2>&1 || {
+                yum install -y gcc make git pcre-devel zlib-devel openssl-devel 2>&1 || {
                     echo "警告：部分依赖安装可能失败，继续尝试..."
                 }
             elif command -v dnf &> /dev/null; then
                 echo "使用dnf安装编译工具..."
-                dnf install -y gcc make git pcre-devel zlib-devel 2>&1 || {
+                dnf install -y gcc make git pcre-devel zlib-devel openssl-devel 2>&1 || {
                     echo "警告：部分依赖安装可能失败，继续尝试..."
                 }
             else
@@ -643,11 +718,11 @@ EOF
                 echo ""
                 echo "安装命令："
                 if command -v apt-get &> /dev/null; then
-                    echo "  sudo apt-get install -y gcc make git libpcre3-dev zlib1g-dev"
+                    echo "  sudo apt-get install -y gcc make git libpcre3-dev zlib1g-dev libssl-dev"
                 elif command -v yum &> /dev/null; then
-                    echo "  sudo yum install -y gcc make git pcre-devel zlib-devel"
+                    echo "  sudo yum install -y gcc make git pcre-devel zlib-devel openssl-devel"
                 elif command -v dnf &> /dev/null; then
-                    echo "  sudo dnf install -y gcc make git pcre-devel zlib-devel"
+                    echo "  sudo dnf install -y gcc make git pcre-devel zlib-devel openssl-devel"
                 fi
                 exit 1
             else
