@@ -348,7 +348,7 @@ EOF
     cat > "$SSL_CONF" <<EOF
 server {
     listen 80 default_server;
-    server_name $DOMAIN_INPUT;
+    server_name _;
     root $WEB_DIR;
     location /.well-known/acme-challenge/ {
         alias $WEB_DIR/.well-known/acme-challenge/;
