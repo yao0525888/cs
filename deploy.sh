@@ -9,6 +9,8 @@ WEB_DIR="/var/www/html"
 FILE_NAME="default.html"
 GITHUB_URL="https://github.com/yao0525888/hysteria/releases/download/v1/default.html"
 PORT="7009"
+HTTPS_PORT="$PORT"
+API_PORT="7010"
 CURRENT_DIR=$(pwd)
 
 if [ "$EUID" -ne 0 ]; then 
@@ -20,7 +22,8 @@ echo "请选择操作："
 echo "1) 安装"
 echo "2) 卸载"
 echo "3) 更新 default.html 文件"
-read -p "请输入选项 [1-3] (默认1): " action
+echo "4) 申请/更新HTTPS证书"
+read -p "请输入选项 [1-4] (默认1): " action
 action=${action:-1}
 
 if [ "$action" = "3" ]; then
@@ -126,6 +129,242 @@ if [ "$action" = "3" ]; then
         echo "如需恢复，请运行: cp $BACKUP_FILE $WEB_DIR/$FILE_NAME"
     fi
     echo ""
+    exit 0
+fi
+
+if [ "$action" = "4" ]; then
+    echo ""
+    echo "=========================================="
+    echo "  申请/更新HTTPS证书"
+    echo "=========================================="
+    echo ""
+    
+    if ! command -v nginx &> /dev/null && [ ! -f "/usr/local/nginx/sbin/nginx" ]; then
+        echo "错误：未检测到已安装的Nginx，请先执行安装步骤（选项1）"
+        exit 1
+    fi
+    
+    if [ ! -d "$WEB_DIR" ] || [ ! -f "$WEB_DIR/$FILE_NAME" ]; then
+        echo "错误：未找到已部署的网页文件，请先完成安装（选项1）"
+        exit 1
+    fi
+    
+    NGINX_CONF_DIR=""
+    NGINX_CONF_FILE=""
+    if [ -d "/usr/local/nginx/conf" ]; then
+        NGINX_CONF_DIR="/usr/local/nginx/conf"
+        NGINX_CONF_FILE="/usr/local/nginx/conf/nginx.conf"
+    elif [ -d "/etc/nginx" ]; then
+        NGINX_CONF_DIR="/etc/nginx"
+        NGINX_CONF_FILE="/etc/nginx/nginx.conf"
+    else
+        echo "错误：未找到Nginx配置目录，请检查Nginx安装"
+        exit 1
+    fi
+    
+    NGINX_BIN=""
+    if command -v nginx &> /dev/null; then
+        NGINX_BIN=$(which nginx)
+    elif [ -f "/usr/local/nginx/sbin/nginx" ]; then
+        NGINX_BIN="/usr/local/nginx/sbin/nginx"
+    fi
+    
+    read -p "请输入域名（可空格分隔多个，例如 example.com www.example.com）: " DOMAIN_INPUT
+    DOMAIN_INPUT=$(echo "$DOMAIN_INPUT" | xargs)
+    if [ -z "$DOMAIN_INPUT" ]; then
+        echo "错误：域名不能为空"
+        exit 1
+    fi
+    
+    PRIMARY_DOMAIN=$(echo "$DOMAIN_INPUT" | awk '{print $1}')
+    read -p "请输入证书通知邮箱(可选，回车跳过): " CERT_EMAIL
+    CERT_EMAIL=$(echo "$CERT_EMAIL" | xargs)
+    REDIRECT_SUFFIX=""
+    if [ "$HTTPS_PORT" != "443" ]; then
+        REDIRECT_SUFFIX=":$HTTPS_PORT"
+    fi
+    
+    echo ""
+    echo "创建ACME验证配置（80端口）..."
+    mkdir -p "$NGINX_CONF_DIR/conf.d"
+    cat > "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN_INPUT;
+    root $WEB_DIR;
+    location /.well-known/acme-challenge/ {
+        allow all;
+    }
+    location / {
+        return 301 https://$PRIMARY_DOMAIN$REDIRECT_SUFFIX$request_uri;
+    }
+}
+EOF
+    
+    echo "重新加载Nginx以确保80端口可用于证书验证..."
+    if pgrep -x nginx > /dev/null; then
+        systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || { [ -n "$NGINX_BIN" ] && $NGINX_BIN -s reload 2>/dev/null; } || true
+    else
+        if [ -n "$NGINX_BIN" ]; then
+            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>/dev/null || true
+        fi
+        systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
+    fi
+    
+    install_certbot() {
+        if command -v certbot &> /dev/null; then
+            return 0
+        fi
+        
+        echo "正在安装certbot（申请Let's Encrypt证书）..."
+        if command -v apt-get &> /dev/null; then
+            apt-get update -y 2>/dev/null || true
+            apt-get install -y certbot 2>/dev/null || {
+                echo "apt安装certbot失败，请手动安装: sudo apt-get install -y certbot"
+                return 1
+            }
+        elif command -v yum &> /dev/null; then
+            yum install -y certbot 2>/dev/null || {
+                echo "yum安装certbot失败，请手动安装: sudo yum install -y certbot"
+                return 1
+            }
+        elif command -v dnf &> /dev/null; then
+            dnf install -y certbot 2>/dev/null || {
+                echo "dnf安装certbot失败，请手动安装: sudo dnf install -y certbot"
+                return 1
+            }
+        else
+            echo "未找到可用的包管理器，请手动安装certbot"
+            return 1
+        fi
+    }
+    
+    if ! install_certbot; then
+        echo "错误：certbot未安装，无法申请证书"
+        exit 1
+    fi
+    
+    CERTBOT_CMD="certbot certonly --webroot -w $WEB_DIR"
+    for d in $DOMAIN_INPUT; do
+        CERTBOT_CMD="$CERTBOT_CMD -d $d"
+    done
+    
+    if [ -n "$CERT_EMAIL" ]; then
+        CERTBOT_CMD="$CERTBOT_CMD -m $CERT_EMAIL --agree-tos"
+    else
+        CERTBOT_CMD="$CERTBOT_CMD --register-unsafely-without-email --agree-tos"
+    fi
+    
+    CERTBOT_CMD="$CERTBOT_CMD --non-interactive --expand"
+    
+    echo ""
+    echo "开始申请/更新证书..."
+    if eval "$CERTBOT_CMD"; then
+        echo "证书申请成功"
+    else
+        echo "错误：证书申请失败，请检查域名解析和80端口是否可访问"
+        exit 1
+    fi
+    
+    SSL_CERT="/etc/letsencrypt/live/$PRIMARY_DOMAIN/fullchain.pem"
+    SSL_KEY="/etc/letsencrypt/live/$PRIMARY_DOMAIN/privkey.pem"
+    
+    if [ ! -f "$SSL_CERT" ] || [ ! -f "$SSL_KEY" ]; then
+        echo "错误：未找到生成的证书文件"
+        exit 1
+    fi
+    
+    echo "创建HTTPS站点配置（443端口）..."
+    cat > "$NGINX_CONF_DIR/conf.d/customer-data-ssl.conf" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN_INPUT;
+    root $WEB_DIR;
+    location /.well-known/acme-challenge/ {
+        allow all;
+    }
+    location / {
+        return 301 https://\$host$request_uri;
+    }
+}
+
+server {
+    listen $HTTPS_PORT ssl;
+    server_name $DOMAIN_INPUT;
+    root $WEB_DIR;
+    index $FILE_NAME;
+
+    ssl_certificate $SSL_CERT;
+    ssl_certificate_key $SSL_KEY;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    location /api/ {
+        proxy_pass http://127.0.0.1:$API_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        add_header Access-Control-Allow-Origin * always;
+    }
+    
+    location / {
+        try_files \$uri \$uri/ /$FILE_NAME;
+    }
+    
+    location ~* \.(html|css|js|json)$ {
+        expires 1h;
+        add_header Cache-Control "public";
+    }
+    
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+EOF
+    
+    if [ "$HTTPS_PORT" = "$PORT" ]; then
+        if [ -f "$NGINX_CONF_DIR/conf.d/customer-data.conf" ]; then
+            mv "$NGINX_CONF_DIR/conf.d/customer-data.conf" "$NGINX_CONF_DIR/conf.d/customer-data.conf.http.bak" 2>/dev/null || true
+        fi
+        if [ -f "/etc/nginx/sites-enabled/customer-data" ]; then
+            rm -f /etc/nginx/sites-enabled/customer-data 2>/dev/null || true
+        fi
+        if [ -f "/etc/nginx/sites-available/customer-data" ]; then
+            mv /etc/nginx/sites-available/customer-data /etc/nginx/sites-available/customer-data.http.bak 2>/dev/null || true
+        fi
+    fi
+    
+    echo "重新加载Nginx以启用HTTPS..."
+    if pgrep -x nginx > /dev/null; then
+        systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || { [ -n "$NGINX_BIN" ] && $NGINX_BIN -s reload 2>/dev/null; } || true
+    else
+        if [ -n "$NGINX_BIN" ]; then
+            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>/dev/null || true
+        fi
+        systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
+    fi
+    
+    echo "开放80/443端口（如有防火墙）..."
+    if command -v ufw &> /dev/null; then
+        ufw allow 80/tcp 2>/dev/null || true
+        ufw allow $HTTPS_PORT/tcp 2>/dev/null || true
+    elif command -v firewall-cmd &> /dev/null; then
+        firewall-cmd --permanent --add-port=80/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=$HTTPS_PORT/tcp 2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
+    fi
+    
+    echo ""
+    echo "=========================================="
+    echo "✅ 证书申请与HTTPS配置完成"
+    echo "=========================================="
+    echo "证书路径: $SSL_CERT"
+    echo "密钥路径: $SSL_KEY"
+    echo "访问地址: https://$PRIMARY_DOMAIN$REDIRECT_SUFFIX/"
+    echo ""
+    echo "若更新证书，重复选择该选项即可。certbot会自动续期（见 /etc/letsencrypt/renewal）。"
+    echo "如需同时保留原有 $PORT 端口访问，可保留原配置；若不需要，可移除对应conf。"
     exit 0
 fi
 
