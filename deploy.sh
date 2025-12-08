@@ -840,6 +840,10 @@ NGINXMAIN
                 sed -i '/http {/a\    include '"$NGINX_CONF_DIR"'/conf.d/*.conf;' "$NGINX_CONF_FILE"
             fi
         fi
+        # 兜底：若未包含conf.d，直接追加到http块末尾
+        if ! grep -q "include $NGINX_CONF_DIR/conf.d/\*.conf;" "$NGINX_CONF_FILE" 2>/dev/null; then
+            perl -0777 -i -pe 's|(http\s*\{)|$1\n    include '"$NGINX_CONF_DIR"'/conf.d/\*.conf;|m' "$NGINX_CONF_FILE"
+        fi
     fi
     
     mkdir -p "$NGINX_CONF_DIR/conf.d"
