@@ -396,8 +396,8 @@ server {
     }
 }
 
-server {
-    listen $HTTPS_PORT ssl;
+ server {
+    listen $HTTPS_PORT ssl default_server;
     server_name $DOMAIN_INPUT;
     root $WEB_DIR;
     index $FILE_NAME;
