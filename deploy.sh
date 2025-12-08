@@ -187,13 +187,15 @@ if [ "$action" = "4" ]; then
     echo ""
     echo "创建ACME验证配置（80端口）..."
     mkdir -p "$NGINX_CONF_DIR/conf.d"
+    mkdir -p "$WEB_DIR/.well-known/acme-challenge"
     cat > "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" <<EOF
 server {
-    listen 80;
+    listen 80 default_server;
     server_name $DOMAIN_INPUT;
     root $WEB_DIR;
     location /.well-known/acme-challenge/ {
-        allow all;
+        alias $WEB_DIR/.well-known/acme-challenge/;
+        try_files \$uri =404;
     }
     location / {
         return 301 https://$PRIMARY_DOMAIN$REDIRECT_SUFFIX$request_uri;
@@ -277,11 +279,12 @@ EOF
     echo "创建HTTPS站点配置（443端口）..."
     cat > "$NGINX_CONF_DIR/conf.d/customer-data-ssl.conf" <<EOF
 server {
-    listen 80;
+    listen 80 default_server;
     server_name $DOMAIN_INPUT;
     root $WEB_DIR;
     location /.well-known/acme-challenge/ {
-        allow all;
+        alias $WEB_DIR/.well-known/acme-challenge/;
+        try_files \$uri =404;
     }
     location / {
         return 301 https://\$host$request_uri;
