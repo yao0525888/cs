@@ -298,8 +298,8 @@ EOF
     rm -f "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" "$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf" 2>/dev/null || true
     ACME_CONF="$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf"
     cat > "$ACME_CONF" <<EOF
- server {
-     listen 80;
+server {
+    listen 80 default_server;
     server_name $DOMAIN_INPUT;
     root $WEB_DIR;
     location /.well-known/acme-challenge/ {
@@ -313,14 +313,8 @@ EOF
 EOF
     
     echo "重新加载Nginx以确保80端口可用于证书验证..."
-    if pgrep -x nginx > /dev/null; then
-        systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null || { [ -n "$NGINX_BIN" ] && $NGINX_BIN -s reload 2>/dev/null; } || true
-    else
-        if [ -n "$NGINX_BIN" ]; then
-            $NGINX_BIN -c "$NGINX_CONF_FILE" 2>/dev/null || true
-        fi
-        systemctl start nginx 2>/dev/null || service nginx start 2>/dev/null || true
-    fi
+    setup_nginx_service
+    manage_nginx_with_systemd
     
     install_certbot() {
         if command -v certbot &> /dev/null; then
