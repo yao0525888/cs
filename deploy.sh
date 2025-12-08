@@ -416,6 +416,10 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
         add_header Access-Control-Allow-Origin * always;
     }
+
+    location = / {
+        try_files /$FILE_NAME =404;
+    }
     
     location / {
         try_files \$uri \$uri/ /$FILE_NAME;
@@ -463,7 +467,7 @@ EOF
     echo "=========================================="
     echo "证书路径: $SSL_CERT"
     echo "密钥路径: $SSL_KEY"
-    echo "访问地址: https://$PRIMARY_DOMAIN$REDIRECT_SUFFIX/"
+    echo "访问地址: https://$PRIMARY_DOMAIN$REDIRECT_SUFFIX"
     echo ""
     echo "若更新证书，重复选择该选项即可。certbot会自动续期（见 /etc/letsencrypt/renewal）。"
     echo "如需同时保留原有 $PORT 端口访问，可保留原配置；若不需要，可移除对应conf。"
