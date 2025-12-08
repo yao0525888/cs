@@ -188,7 +188,10 @@ if [ "$action" = "4" ]; then
     echo "创建ACME验证配置（80端口）..."
     mkdir -p "$NGINX_CONF_DIR/conf.d"
     mkdir -p "$WEB_DIR/.well-known/acme-challenge"
-    cat > "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" <<EOF
+    # 避免旧配置或重复 default_server，先清理已有 ACME 配置
+    rm -f "$NGINX_CONF_DIR/conf.d/customer-data-acme.conf" "$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf" 2>/dev/null || true
+    ACME_CONF="$NGINX_CONF_DIR/conf.d/00-customer-data-acme.conf"
+    cat > "$ACME_CONF" <<EOF
 server {
     listen 80 default_server;
     server_name $DOMAIN_INPUT;
@@ -277,7 +280,10 @@ EOF
     fi
     
     echo "创建HTTPS站点配置（443端口）..."
-    cat > "$NGINX_CONF_DIR/conf.d/customer-data-ssl.conf" <<EOF
+    # 同步清理旧的 HTTPS/明文 7009 配置，确保7009仅走SSL
+    rm -f "$NGINX_CONF_DIR/conf.d/customer-data-ssl.conf" "$NGINX_CONF_DIR/conf.d/01-customer-data-ssl.conf" "$NGINX_CONF_DIR/conf.d/customer-data.conf" "$NGINX_CONF_DIR/conf.d/customer-data.conf.http.bak" 2>/dev/null || true
+    SSL_CONF="$NGINX_CONF_DIR/conf.d/01-customer-data-ssl.conf"
+    cat > "$SSL_CONF" <<EOF
 server {
     listen 80 default_server;
     server_name $DOMAIN_INPUT;
