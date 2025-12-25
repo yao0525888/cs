@@ -77,7 +77,12 @@ fi
 # 开机自启
 systemctl enable --now nginx
 systemctl enable --now redis-server
-systemctl enable --now php*-fpm
+# 启用所有已安装的 php-fpm 版本
+if systemctl list-unit-files | grep -qE '^php[0-9.]+-fpm\.service'; then
+  for svc in $(systemctl list-unit-files | awk '/^php[0-9.]+-fpm\.service/ {print $1}'); do
+    systemctl enable --now "$svc" || true
+  done
+fi
 systemctl enable --now mysql || systemctl enable --now mariadb
 
 # ---------- 创建数据库及用户 ---------------------------------------------------
