@@ -1,206 +1,165 @@
 #!/usr/bin/env bash
+# ==========================================================
+# 一键安装 dujiaoka   Author: Cursor AI   Date: 2025-12-25
+#  - 适用系统：Debian 11 / 12 ×64
+#  - 功   能：自动安装 Nginx + PHP-FPM + MySQL + Redis 并部署 dujiaoka
+#  - 选   择：可输入域名启用 HTTPS，也可留空只用服务器 IP
+#  - 管理员：用户名 damin   密码 yao581581
+# ==========================================================
 set -euo pipefail
 
-# ====== 可修改项 ======
-APP_DIR="/var/www/dujiaoka"
+## ===== 可调整项 =====
+APP_DIR=/var/www/dujiaoka
 REPO_URL="https://github.com/assimon/dujiaoka.git"
-BRANCH="master"
+BRANCH=master
 
-ADMIN_USER="damin"
-ADMIN_PASS="yao581581"
+ADMIN_USER=damin
+ADMIN_PASS=yao581581
 
-DB_NAME="dujiaoka"
-DB_USER="dujiaoka"
-# 自动生成数据库密码
+DB_NAME=dujiaoka
+DB_USER=dujiaoka
 DB_PASS="$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)"
 
-# PHP 版本（Debian 11 默认 7.4，Debian 12 默认 8.2）
-# dujiaoka 常见可用：7.4/8.0/8.1/8.2（以项目实际要求为准）
-PHP_VER=""   # 留空表示自动选择系统默认
-# =====================
+# PHP 版本（留空=系统默认：Debian11→7.4，Debian12→8.2）
+PHP_VER=""
+## ====================
+
+echo "================ dujiaoka 一键安装脚本 ================"
+echo "提示：脚本会全自动安装 Nginx / PHP / MySQL / Redis 等组件。"
+echo "-------------------------------------------------------"
+read -rp "请输入安装访问域名(留空则使用服务器 IP 访问)： " SITE_DOMAIN
+USE_DOMAIN=false
+if [[ -n "$SITE_DOMAIN" ]]; then USE_DOMAIN=true; fi
+echo "-------------------------------------------------------"
+echo "管理员账号：$ADMIN_USER"
+echo "管理员密码：$ADMIN_PASS"
+echo "数据库名：$DB_NAME"
+echo "数据库用户：$DB_USER"
+echo "数据库密码：$DB_PASS"
+echo "======================================================="
+read -rp "确认无误后回车继续，Ctrl+C 退出..."
 
 if [[ $EUID -ne 0 ]]; then
-  echo "请用 root 运行：sudo -i 后再执行。"
-  exit 1
-fi
+  echo "请以 root 身份运行( sudo -i )"; exit 1; fi
 
 DEBIAN_VER="$(. /etc/os-release && echo "${VERSION_ID}")"
-if [[ "${DEBIAN_VER}" != "11" && "${DEBIAN_VER}" != "12" ]]; then
-  echo "仅支持 Debian 11/12，当前：${DEBIAN_VER}"
-  exit 1
-fi
+[[ "$DEBIAN_VER" =~ ^11|12$ ]] || {
+  echo "仅支持 Debian 11/12 ，当前 ${DEBIAN_VER}"; exit 1; }
 
-echo "[1/9] 安装基础依赖..."
-# 不执行系统更新（按你的要求）
-# apt-get update -y
-apt-get install -y curl wget git unzip zip ca-certificates lsb-release gnupg2 apt-transport-https software-properties-common
+echo "[1/10] 更新系统..."
+apt-get update -y
+apt-get install -y curl wget git unzip zip ca-certificates lsb-release gnupg2 \
+                   apt-transport-https software-properties-common
 
-echo "[2/9] 安装 Nginx..."
+echo "[2/10] 安装 Nginx..."
 apt-get install -y nginx
 
-echo "[3/9] 安装 Redis..."
+echo "[3/10] 安装 Redis..."
 apt-get install -y redis-server
 
-echo "[4/9] 安装 MariaDB..."
-# 使用 Debian 官方源自带的 MariaDB，确保 100% 无交互安装
+echo "[4/10] 安装 MySQL..."
 if ! command -v mysql >/dev/null 2>&1; then
-  DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server mariadb-client
-fi
-systemctl enable mariadb
-systemctl restart mariadb
-
-echo "[5/9] 安装 PHP-FPM + 扩展 + Composer..."
-# 选择 PHP 版本：留空则用系统默认
-if [[ -z "${PHP_VER}" ]]; then
-  if [[ "${DEBIAN_VER}" == "11" ]]; then PHP_VER="7.4"; else PHP_VER="8.2"; fi
+  cd /tmp && wget -q https://dev.mysql.com/get/mysql-apt-config_0.8.29-1_all.deb \
+       -O mysql-apt-config.deb
+  echo "mysql-apt-config mysql-apt-config/select-server select mysql-8.0 debconf" \
+      | debconf-set-selections
+  DEBIAN_FRONTEND=noninteractive dpkg -i mysql-apt-config.deb >/dev/null 2>&1
+  apt-get update -y
+  DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-community-server
 fi
 
-# Debian 官方源不一定含旧版本；这里优先尝试系统源安装对应版本，失败则提示你改用默认或走 sury 源
-set +e
-apt-get install -y \
-  "php${PHP_VER}-fpm" \
-  "php${PHP_VER}-cli" \
-  "php${PHP_VER}-common" \
-  "php${PHP_VER}-curl" \
-  "php${PHP_VER}-mbstring" \
-  "php${PHP_VER}-xml" \
-  "php${PHP_VER}-zip" \
-  "php${PHP_VER}-gd" \
-  "php${PHP_VER}-mysql" \
-  "php${PHP_VER}-bcmath" \
-  "php${PHP_VER}-redis" \
-  "php${PHP_VER}-intl" \
-  "php${PHP_VER}-opcache"
-PHP_OK=$?
-set -e
+echo "[5/10] 安装 PHP$PHP_VER ..."
+if [[ -z "$PHP_VER" ]]; then
+  PHP_VER=$([[ "$DEBIAN_VER" == 11 ]] && echo 7.4 || echo 8.2); fi
+apt-get install -y php${PHP_VER}-{fpm,cli,common,curl,mbstring,xml,zip,gd,mysql,bcmath,redis,intl,opcache}
 
-if [[ $PHP_OK -ne 0 ]]; then
-  echo "安装 php${PHP_VER} 失败。可能系统源不提供该版本。"
-  echo "你可以："
-  echo "1) 告诉我你希望用 Debian 默认 PHP（Debian 12=8.2）我给你改脚本"
-  echo "2) 或启用 sury 源安装指定版本（我也可提供）"
-  exit 1
-fi
+echo "[6/10] 安装 Composer..."
+command -v composer >/dev/null 2>&1 || \
+  curl -fsSL https://getcomposer.org/installer | php -- \
+      --install-dir=/usr/local/bin --filename=composer
 
-if ! command -v composer >/dev/null 2>&1; then
-  curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-fi
+echo "[7/10] 拉取 dujiaoka..."
+rm -rf "$APP_DIR"; mkdir -p "$APP_DIR"
+git clone --depth 1 -b "$BRANCH" "$REPO_URL" "$APP_DIR"
+chown -R www-data:www-data "$APP_DIR"
 
-echo "[6/9] 拉取 dujiaoka 代码..."
-rm -rf "${APP_DIR}"
-mkdir -p "${APP_DIR}"
-git clone -b "${BRANCH}" --depth 1 "${REPO_URL}" "${APP_DIR}"
+echo "[8/10] 安装 PHP 依赖 & 初始化 .env..."
+sudo -u www-data bash -lc "
+  cd '$APP_DIR'
+  cp -n .env.example .env
+  composer install --no-dev -o
+  php artisan key:generate --force
+"
+sed -i "s/^DB_HOST=.*/DB_HOST=127.0.0.1/;
+        s/^DB_PORT=.*/DB_PORT=3306/;
+        s/^DB_DATABASE=.*/DB_DATABASE=$DB_NAME/;
+        s/^DB_USERNAME=.*/DB_USERNAME=$DB_USER/;
+        s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASS/" "$APP_DIR/.env"
 
-chown -R www-data:www-data "${APP_DIR}"
-
-echo "[7/9] 配置 .env 并安装依赖..."
-cd "${APP_DIR}"
-
-if [[ -f .env.example && ! -f .env ]]; then
-  cp .env.example .env
-fi
-
-# 生成 APP_KEY（Laravel 风格）
-sudo -u www-data bash -lc "cd '${APP_DIR}' && composer install --no-dev -o"
-sudo -u www-data bash -lc "cd '${APP_DIR}' && php artisan key:generate --force"
-
-# 配置数据库/缓存（尽量用通用键名；若项目 env 键不同，报错贴我我来适配）
-sed -i "s/^DB_HOST=.*/DB_HOST=127.0.0.1/g" .env || true
-sed -i "s/^DB_PORT=.*/DB_PORT=3306/g" .env || true
-sed -i "s/^DB_DATABASE=.*/DB_DATABASE=${DB_NAME}/g" .env || true
-sed -i "s/^DB_USERNAME=.*/DB_USERNAME=${DB_USER}/g" .env || true
-sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=${DB_PASS}/g" .env || true
-
-# Redis
-grep -q "^REDIS_HOST=" .env 2>/dev/null && sed -i "s/^REDIS_HOST=.*/REDIS_HOST=127.0.0.1/g" .env || true
-grep -q "^REDIS_PORT=" .env 2>/dev/null && sed -i "s/^REDIS_PORT=.*/REDIS_PORT=6379/g" .env || true
-
-echo "[8/9] 创建数据库和用户..."
-# MySQL root 登录方式在不同安装模式不同：优先尝试 socket
-mysql -uroot -e "SELECT 1;" >/dev/null 2>&1 || true
-
+echo "[9/10] 创建数据库 & 赋权..."
 mysql -uroot <<SQL
-CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';
-CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1';
-GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 SQL
 
-echo "[9/9] 初始化 dujiaoka 数据表 & 创建管理员..."
-sudo -u www-data bash -lc "cd '${APP_DIR}' && php artisan migrate --force" || true
+echo "[10/10] 导入表 & 创建管理员..."
+sudo -u www-data bash -lc "cd '$APP_DIR' && php artisan migrate --force"
+sudo -u www-data bash -lc "cd '$APP_DIR' && php artisan admin:create \
+      --username='$ADMIN_USER' --password='$ADMIN_PASS' || true"
 
-# dujiaoka 创建管理员命令/表字段可能随版本变化：
-# 这里优先尝试 artisan 命令；若不存在则提示你把报错贴出来我再适配（我能改成直接写库）
-set +e
-sudo -u www-data bash -lc "cd '${APP_DIR}' && php artisan admin:create --username='${ADMIN_USER}' --password='${ADMIN_PASS}'" 
-CREATE_ADMIN_OK=$?
-set -e
-
-if [[ $CREATE_ADMIN_OK -ne 0 ]]; then
-  echo "未能通过 artisan 创建管理员（可能该版本命令不同）。"
-  echo "先继续完成 Nginx 配置。安装后你把上述报错复制给我，我给你适配成正确的创建方式。"
-fi
-
-echo "配置 Nginx 站点..."
-PHP_FPM_SOCK="/run/php/php${PHP_VER}-fpm.sock"
-NGINX_SITE="/etc/nginx/sites-available/dujiaoka"
-
-cat > "${NGINX_SITE}" <<'NGINX'
+PHP_FPM_SOCK=/run/php/php${PHP_VER}-fpm.sock
+NGINX_CONF=/etc/nginx/sites-available/dujiaoka
+cat > "$NGINX_CONF" <<NGINX
 server {
     listen 80;
-    server_name _;
-    root /var/www/dujiaoka/public;
-
+    $( $USE_DOMAIN && echo "server_name $SITE_DOMAIN;" || echo "server_name _;" )
+    root $APP_DIR/public;
     index index.php index.html;
 
     client_max_body_size 50m;
 
     location / {
-        try_files $uri $uri/ /index.php?$query_string;
+        try_files \$uri \$uri/ /index.php?\$query_string;
     }
-
-    location ~ \.php$ {
+    location ~ \.php\$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:__PHP_FPM_SOCK__;
+        fastcgi_pass unix:$PHP_FPM_SOCK;
     }
-
-    location ~* \.(jpg|jpeg|gif|png|css|js|ico|svg|woff|woff2|ttf|eot)$ {
+    location ~* \.(jpg|jpeg|gif|png|css|js|ico|svg|woff|woff2|ttf|eot)\$ {
         expires 30d;
         access_log off;
     }
 }
 NGINX
 
-sed -i "s#__PHP_FPM_SOCK__#${PHP_FPM_SOCK}#g" "${NGINX_SITE}"
+ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/dujiaoka
+rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx
 
-ln -sf "${NGINX_SITE}" /etc/nginx/sites-enabled/dujiaoka
-rm -f /etc/nginx/sites-enabled/default || true
+# ===== 申请证书 =====
+if $USE_DOMAIN; then
+  echo "检测到域名，自动申请 SSL 证书..."
+  apt-get install -y certbot python3-certbot-nginx
+  certbot --nginx --non-interactive --agree-tos -m admin@$SITE_DOMAIN -d "$SITE_DOMAIN"
+fi
 
-nginx -t
-systemctl restart nginx
-systemctl enable nginx
+systemctl enable --now nginx redis-server php${PHP_VER}-fpm
 
-systemctl enable redis-server || true
-systemctl restart redis-server || true
-
-systemctl enable "php${PHP_VER}-fpm"
-systemctl restart "php${PHP_VER}-fpm"
-
-echo
 IP_ADDR="$(hostname -I | awk '{print $1}')"
-echo "安装完成。"
-echo "访问地址:   http://${IP_ADDR}/"
-echo "后台入口一般为: http://${IP_ADDR}/admin （若不对，把实际后台路径告诉我）"
 echo
-echo "数据库信息："
-echo "  DB:   ${DB_NAME}"
-echo "  User: ${DB_USER}"
-echo "  Pass: ${DB_PASS}"
+echo "=========== dujiaoka 安装完成 ==========="
+if $USE_DOMAIN; then
+  echo "请稍等 1~2 分钟让证书自动配置生效。"
+  echo "前台地址: https://$SITE_DOMAIN/"
+  echo "后台地址: https://$SITE_DOMAIN/admin"
+else
+  echo "前台地址: http://$IP_ADDR/"
+  echo "后台地址: http://$IP_ADDR/admin"
+fi
 echo
-echo "管理员（按你要求）："
-echo "  User: ${ADMIN_USER}"
-echo "  Pass: ${ADMIN_PASS}"
-echo
-echo "强烈建议：登录后台后立刻修改密码。"
+echo "管理员账号: $ADMIN_USER"
+echo "管理员密码: $ADMIN_PASS   (请登录后立即修改!)"
+echo "========================================"
+
