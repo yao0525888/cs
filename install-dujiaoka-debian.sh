@@ -83,7 +83,8 @@ if systemctl list-unit-files | grep -qE '^php[0-9.]+-fpm\.service'; then
     systemctl enable --now "$svc" || true
   done
 fi
-systemctl enable --now mysql || systemctl enable --now mariadb
+# 启动/自启 MariaDB
+systemctl enable --now mariadb
 
 # ---------- 创建数据库及用户 ---------------------------------------------------
 DB_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 20)
