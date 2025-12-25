@@ -69,10 +69,10 @@ apt-get install -y nginx redis-server certbot python3-certbot-nginx
 apt-get install -y php-fpm php-cli php-common php-mysql php-redis php-curl php-gd php-mbstring \
                    php-xml php-zip php-bcmath php-intl php-soap composer
 
-# MySQL (尝试安装 mysql-server, 若失败则 mariadb-server)
-if ! apt-get install -y mysql-server; then
-  apt-get install -y mariadb-server
-fi
+# MySQL
+# Debian 12 官方仓库默认提供 MariaDB (mysql-server 可能无候选包)，这里优先使用 MariaDB；
+# 如你自行配置了 Oracle MySQL 源，也可以把下面逻辑改回 mysql-server。
+apt-get install -y mariadb-server
 
 # 开机自启
 systemctl enable --now nginx
