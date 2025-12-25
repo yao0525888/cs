@@ -30,8 +30,9 @@ if [[ "${DEBIAN_VER}" != "11" && "${DEBIAN_VER}" != "12" ]]; then
   exit 1
 fi
 
-echo "[1/9] 更新系统 & 安装基础依赖..."
-apt-get update -y
+echo "[1/9] 安装基础依赖..."
+# 不执行系统更新（按你的要求）
+# apt-get update -y
 apt-get install -y curl wget git unzip zip ca-certificates lsb-release gnupg2 apt-transport-https software-properties-common
 
 echo "[2/9] 安装 Nginx..."
