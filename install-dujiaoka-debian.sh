@@ -40,18 +40,13 @@ apt-get install -y nginx
 echo "[3/9] 安装 Redis..."
 apt-get install -y redis-server
 
-echo "[4/9] 安装 MySQL..."
-# Debian 11/12 默认源通常是 MariaDB；你明确要 MySQL，这里用 MySQL 官方 APT 源
-# 为了做到“无人值守”，用 mysql-community-server 默认安装（会自动设置 root 使用 auth_socket 或随机密码，因版本而异）
-# 若你更希望简单稳定，可改用 MariaDB（我也可以给你 MariaDB 版脚本）
+echo "[4/9] 安装 MariaDB..."
+# 使用 Debian 官方源自带的 MariaDB，确保 100% 无交互安装
 if ! command -v mysql >/dev/null 2>&1; then
-  echo "添加 MySQL APT 源..."
-  cd /tmp
-  wget -q https://dev.mysql.com/get/mysql-apt-config_0.8.29-1_all.deb -O mysql-apt-config.deb
-  DEBIAN_FRONTEND=noninteractive dpkg -i mysql-apt-config.deb >/dev/null 2>&1 || true
-  apt-get update -y
-  DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-community-server
+  DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server mariadb-client
 fi
+systemctl enable mariadb
+systemctl restart mariadb
 
 echo "[5/9] 安装 PHP-FPM + 扩展 + Composer..."
 # 选择 PHP 版本：留空则用系统默认
