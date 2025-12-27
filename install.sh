@@ -1118,12 +1118,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # 安装构建依赖（用于编译 bcrypt 等需要本地编译的扩展）
-RUN apt-get update && apt-get install -y --no-install-recommends \\
-    build-essential \\
-    libssl-dev \\
-    python3-dev \\
-    gcc \\
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libssl-dev python3-dev gcc && rm -rf /var/lib/apt/lists/*
 
 COPY api/requirements.txt .
 RUN pip install --upgrade pip
