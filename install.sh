@@ -281,7 +281,7 @@ create_project() {
 create_api_service() {
     log_info "创建API服务..."
 
-    # 创建requirements.txt（固定依赖版本以避免 bcrypt/passlib 不兼容）
+    # 创建requirements.txt（使用 Argon2 以避免 bcrypt 72 字节限制）
     cat > api/requirements.txt << 'EOF'
 fastapi==0.101.0
 uvicorn==0.26.0
@@ -290,8 +290,8 @@ alembic==1.12.1
 pydantic==2.5.0
 python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==3.2.2
+passlib[argon2]==1.7.4
+argon2-cffi==21.3.0
 python-dotenv==1.0.0
 slowapi==0.1.9
 aiosqlite==0.19.0
@@ -346,37 +346,23 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from typing import Optional
-import hashlib
 import os
 
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-def _normalize_password_for_hash(password: str) -> str:
-    """
-    归一化密码为传入 bcrypt 的字符串。
-    若原始密码字节长度 > 72（bcrypt 限制），先用 SHA-256 摘要并以 hex 表示。
-    否则直接以 utf-8 字符串形式返回（保留原始字符）。
-    """
-    if isinstance(password, str):
-        pw_bytes = password.encode('utf-8')
-    else:
-        pw_bytes = bytes(password)
-    if len(pw_bytes) > 72:
-        return hashlib.sha256(pw_bytes).hexdigest()
-    return pw_bytes.decode('utf-8', errors='surrogateescape')
+# 使用 Argon2 作为密码哈希算法（支持任意长度密码）
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
-        return pwd_context.verify(_normalize_password_for_hash(plain_password), hashed_password)
+        return pwd_context.verify(plain_password, hashed_password)
     except Exception:
         return False
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(_normalize_password_for_hash(password))
+    return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -699,14 +685,14 @@ async def admin_get_stats(admin = Depends(get_current_admin), db: Session = Depe
 # Public license API routes
 @app.post("/api/activate", response_model=ActivateResponse)
 @limiter.limit("10/minute")
-async def license_activate(req: ActivateRequest, db: Session = Depends(get_db)):
+async def license_activate(request: Request, req: ActivateRequest, db: Session = Depends(get_db)):
     code_hash = make_code_hash(req.activation_code)
     allowed, reason, expires_at = activate_key(db, code_hash, req.machine_code)
     return ActivateResponse(allowed=allowed, expires_at=expires_at.isoformat() if expires_at else None, message=reason)
 
 @app.post("/api/verify", response_model=VerifyResponse)
 @limiter.limit("30/minute")
-async def license_verify(req: VerifyRequest, db: Session = Depends(get_db)):
+async def license_verify(request: Request, req: VerifyRequest, db: Session = Depends(get_db)):
     code_hash = make_code_hash(req.activation_code)
     valid, reason, expires_at, bound_hwid = verify_key(db, code_hash, req.machine_code)
     return VerifyResponse(valid=valid, expires_at=expires_at.isoformat() if expires_at else None, bound_hwid=bound_hwid, message=reason)
@@ -720,6 +706,30 @@ if __name__ == "__main__":
 EOF
 
     log_success "API服务创建完成"
+}
+
+# 修补已生成的 API 文件（确保 slowapi 限流装饰器的函数签名包含 Request）
+patch_generated_files() {
+    log_info "修补生成的 API 文件..."
+    if [[ -f "api/main.py" ]]; then
+        BACKUP="api/main.py.bak.$(date +%s)"
+        cp -p api/main.py "$BACKUP"
+        log_info "已备份 api/main.py -> $BACKUP"
+
+        # 确保从 fastapi 导入 Request
+        if ! grep -q "Request" api/main.py; then
+            sed -i "s/from fastapi import /from fastapi import Request, /" api/main.py || true
+            log_info "插入 Request 导入"
+        fi
+
+        # 为 limiter 装饰的路由添加 request: Request 参数（若尚未添加）
+        perl -0777 -pe 's/async def license_activate\(\s*req\s*:\s*ActivateRequest/async def license_activate(request: Request, req: ActivateRequest/s' -i api/main.py || true
+        perl -0777 -pe 's/async def license_verify\(\s*req\s*:\s*VerifyRequest/async def license_verify(request: Request, req: VerifyRequest/s' -i api/main.py || true
+
+        log_success "api/main.py 修补完成（备份在 $BACKUP）"
+    else
+        log_warn "未找到 api/main.py，跳过修补"
+    fi
 }
 
 # 创建Web管理界面
@@ -1447,6 +1457,7 @@ full_install() {
     create_api_service
     create_web_interface
     create_docker_config
+    patch_generated_files
     start_services
     show_installation_info
 
