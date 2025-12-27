@@ -392,6 +392,7 @@ import datetime
 import secrets
 import hmac
 import hashlib
+import os
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from models import ActivationKey
@@ -1620,7 +1621,7 @@ install_docker_compose_binary() {
 show_menu() {
     echo ""
     echo "========================================"
-    echo "🚀 Velyorix License Server 管理菜1"
+    echo "🚀 Velyorix License Server 管理菜2"
     echo "========================================"
     echo "1) 完整安装 (推荐新手)"
     echo "2) 仅安装Docker环境"
