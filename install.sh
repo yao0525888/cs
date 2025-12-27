@@ -523,7 +523,7 @@ def create_default_admin():
     try:
         admin = db.query(AdminUser).filter(AdminUser.username == "admin").first()
         if not admin:
-            hashed_password = get_password_hash("admin123")
+            hashed_password = get_password_hash(os.getenv("ADMIN_PASSWORD", "yao581581"))
             admin = AdminUser(
                 username="admin",
                 hashed_password=hashed_password,
@@ -531,7 +531,7 @@ def create_default_admin():
             )
             db.add(admin)
             db.commit()
-            print("Default admin user created: admin/admin123")
+            print("Default admin user created: admin/" + os.getenv("ADMIN_PASSWORD", "yao581581"))
     finally:
         db.close()
 
@@ -758,7 +758,7 @@ create_web_interface() {
                                         </div>
                                         <div class="mb-3">
                                             <label class="form-label">密码</label>
-                                            <input type="password" class="form-control" id="password" value="admin123" required>
+                                            <input type="password" class="form-control" id="password" value="yao581581" required>
                                         </div>
                                         <button type="submit" class="btn btn-primary w-100"><i class="fas fa-sign-in-alt"></i> 登录</button>
                                     </form>
@@ -1122,11 +1122,12 @@ services:
     environment:
       - SECRET_KEY=velyorix-secret-key-2024-production-ready
       - DATABASE_URL=sqlite:///./data/velyorix_license.db
+      - ADMIN_PASSWORD=yao581581
 
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
+      - "7020:80"
     volumes:
       - ./web:/usr/share/nginx/html
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
@@ -1170,14 +1171,18 @@ start_services() {
     log_info "启动Velyorix License Server..."
 
     # 启动服务
-    docker-compose up -d --build
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose up -d --build
+    else
+        docker compose up -d --build
+    fi
 
     # 等待服务启动
     log_info "等待服务启动..."
     sleep 10
 
-    # 检查服务状态
-    if curl -f http://localhost/api/health >/dev/null 2>&1; then
+    # 检查服务状态 (通过 nginx 端口 7020)
+    if curl -f http://localhost:7020/api/health >/dev/null 2>&1; then
         log_success "服务启动成功！"
     else
         log_error "服务启动失败，请检查日志：docker-compose logs"
@@ -1190,12 +1195,12 @@ show_installation_info() {
     log_success "🎉 Velyorix License Server 安装完成！"
     echo ""
     echo "📊 访问信息："
-    echo "   管理后台: http://$(hostname -I | awk '{print $1}')"
-    echo "   API地址: http://$(hostname -I | awk '{print $1}')/api"
+    echo "   管理后台: http://$(hostname -I | awk '{print $1}'):7020"
+    echo "   API地址: http://$(hostname -I | awk '{print $1}'):7020/api"
     echo ""
     echo "👤 默认管理员账号："
     echo "   用户名: admin"
-    echo "   密码: admin123"
+    echo "   密码: yao581581"
     echo ""
     echo "🔧 管理命令："
     echo "   查看日志: docker-compose logs -f"
@@ -1458,14 +1463,14 @@ check_service_status() {
         fi
 
         echo ""
-        echo "服务健康检查:"
-        if curl -f http://localhost/api/health >/dev/null 2>&1; then
+        echo "服务健康检查 (通过端口 7020):"
+        if curl -f http://localhost:7020/api/health >/dev/null 2>&1; then
             echo "✅ API服务正常"
         else
             echo "❌ API服务异常"
         fi
 
-        if curl -f http://localhost >/dev/null 2>&1; then
+        if curl -f http://localhost:7020 >/dev/null 2>&1; then
             echo "✅ Web服务正常"
         else
             echo "❌ Web服务异常"
