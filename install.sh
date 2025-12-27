@@ -281,16 +281,17 @@ create_project() {
 create_api_service() {
     log_info "创建API服务..."
 
-    # 创建requirements.txt
+    # 创建requirements.txt（固定依赖版本以避免 bcrypt/passlib 不兼容）
     cat > api/requirements.txt << 'EOF'
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-sqlalchemy==2.0.23
+fastapi==0.101.0
+uvicorn==0.26.0
+sqlalchemy==2.0.20
 alembic==1.12.1
 pydantic==2.5.0
 python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
 python-dotenv==1.0.0
 slowapi==0.1.9
 aiosqlite==0.19.0
@@ -1110,13 +1111,22 @@ EOF
 create_docker_config() {
     log_info "创建Docker配置..."
 
-    # 创建Dockerfile
+    # 创建Dockerfile（确保安装构建依赖以正确编译/安装 bcrypt 等包）
     cat > Dockerfile << 'EOF'
 FROM python:3.11-slim
 
 WORKDIR /app
 
+# 安装构建依赖（用于编译 bcrypt 等需要本地编译的扩展）
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    build-essential \\
+    libssl-dev \\
+    python3-dev \\
+    gcc \\
+    && rm -rf /var/lib/apt/lists/*
+
 COPY api/requirements.txt .
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api/ .
