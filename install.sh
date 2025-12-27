@@ -1426,33 +1426,44 @@ apply_runtime_fixes() {
 
     # 复制必要文件（覆盖部署目录）
     log_info "复制 api/ web/ docker-compose.yml nginx.conf 到 $PROJECT_DIR"
-    # 使用脚本所在目录作为源目录，避免当前工作目录不同导致找不到文件
-    SRC_DIR="$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)"
+    # 确定脚本所在目录作为源目录（兼容被 source /dev/fd/ 运行的情况）
+    if [[ -n "${BASH_SOURCE[0]}" ]]; then
+        SRC_CAND="${BASH_SOURCE[0]}"
+    else
+        SRC_CAND="$0"
+    fi
+    # 如果脚本来自 /dev/fd 或 proc 等不可直接定位的位置，回退到当前工作目录
+    if [[ "$SRC_CAND" == /dev/fd/* ]] || [[ "$SRC_CAND" == /proc/* ]] || [[ ! -e "$SRC_CAND" ]]; then
+        SRC_DIR="$(pwd)"
+    else
+        SRC_DIR="$(cd "$(dirname "$SRC_CAND")" >/dev/null 2>&1 && pwd || pwd)"
+    fi
+
     sudo rm -rf "$PROJECT_DIR"/api "$PROJECT_DIR"/web "$PROJECT_DIR"/Dockerfile "$PROJECT_DIR"/docker-compose.yml "$PROJECT_DIR"/nginx.conf 2>/dev/null || true
-    if [[ -d \"$SRC_DIR/api\" ]]; then
-        sudo cp -r \"$SRC_DIR/api\" \"$PROJECT_DIR/\" || true
+    if [[ -d "$SRC_DIR/api" ]]; then
+        sudo cp -r "$SRC_DIR/api" "$PROJECT_DIR/" || true
     else
-        log_warn \"源目录不存在：$SRC_DIR/api，跳过复制 api/\"
+        log_warn "源目录不存在：$SRC_DIR/api，跳过复制 api/"
     fi
-    if [[ -d \"$SRC_DIR/web\" ]]; then
-        sudo cp -r \"$SRC_DIR/web\" \"$PROJECT_DIR/\" || true
+    if [[ -d "$SRC_DIR/web" ]]; then
+        sudo cp -r "$SRC_DIR/web" "$PROJECT_DIR/" || true
     else
-        log_warn \"源目录不存在：$SRC_DIR/web，跳过复制 web/\"
+        log_warn "源目录不存在：$SRC_DIR/web，跳过复制 web/"
     fi
-    if [[ -f \"$SRC_DIR/Dockerfile\" ]]; then
-        sudo cp \"$SRC_DIR/Dockerfile\" \"$PROJECT_DIR/\" || true
+    if [[ -f "$SRC_DIR/Dockerfile" ]]; then
+        sudo cp "$SRC_DIR/Dockerfile" "$PROJECT_DIR/" || true
     else
-        log_warn \"源文件不存在：$SRC_DIR/Dockerfile，跳过复制 Dockerfile\"
+        log_warn "源文件不存在：$SRC_DIR/Dockerfile，跳过复制 Dockerfile"
     fi
-    if [[ -f \"$SRC_DIR/docker-compose.yml\" ]]; then
-        sudo cp \"$SRC_DIR/docker-compose.yml\" \"$PROJECT_DIR/\" || true
+    if [[ -f "$SRC_DIR/docker-compose.yml" ]]; then
+        sudo cp "$SRC_DIR/docker-compose.yml" "$PROJECT_DIR/" || true
     else
-        log_warn \"源文件不存在：$SRC_DIR/docker-compose.yml，跳过复制 docker-compose.yml\"
+        log_warn "源文件不存在：$SRC_DIR/docker-compose.yml，跳过复制 docker-compose.yml"
     fi
-    if [[ -f \"$SRC_DIR/nginx.conf\" ]]; then
-        sudo cp \"$SRC_DIR/nginx.conf\" \"$PROJECT_DIR/\" || true
+    if [[ -f "$SRC_DIR/nginx.conf" ]]; then
+        sudo cp "$SRC_DIR/nginx.conf" "$PROJECT_DIR/" || true
     else
-        log_warn \"源文件不存在：$SRC_DIR/nginx.conf，跳过复制 nginx.conf\"
+        log_warn "源文件不存在：$SRC_DIR/nginx.conf，跳过复制 nginx.conf"
     fi
 
     # 设置权限
@@ -1477,7 +1488,7 @@ EOF
 show_menu() {
     echo ""
     echo "========================================"
-    echo "🚀 Velyorix License Server 管理单"
+    echo "🚀 Velyorix License Server 管单"
     echo "========================================"
     echo "1) 完整安装 (推荐新手)"
     echo "2) 仅安装Docker环境"
