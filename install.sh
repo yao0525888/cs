@@ -119,8 +119,19 @@ install_docker() {
             sudo $PACKAGE_MANAGER update
             sudo $PACKAGE_MANAGER install -y ca-certificates curl gnupg lsb-release wget apt-transport-https
 
-            # 获取系统版本
+            # 获取系统版本，并处理特殊情况
             SYSTEM_CODENAME=$(lsb_release -cs 2>/dev/null || echo "focal")
+
+            # 处理Debian bookworm的特殊情况
+            if [[ "$OS" == "debian" ]] && [[ "$SYSTEM_CODENAME" == "bookworm" ]]; then
+                # Debian bookworm可能需要使用bullseye的仓库
+                if curl -fsSL --connect-timeout 5 https://download.docker.com/linux/debian/dists/bookworm/Release >/dev/null 2>&1; then
+                    log_info "Debian bookworm仓库可用"
+                else
+                    log_warn "Debian bookworm仓库不可用，尝试使用bullseye仓库"
+                    SYSTEM_CODENAME="bullseye"
+                fi
+            fi
 
             # 多重回退方案安装Docker
             DOCKER_INSTALLED=false
@@ -172,7 +183,16 @@ install_docker() {
                 fi
             fi
 
-            # 方案4: 如果都失败了，使用二进制安装
+            # 方案4: 特殊处理Debian bookworm
+            if [[ "$DOCKER_INSTALLED" == false ]] && [[ "$OS" == "debian" ]] && [[ "$(lsb_release -cs 2>/dev/null)" == "bookworm" ]]; then
+                log_warn "尝试Debian bookworm专用安装方法..."
+                if install_docker_debian_bookworm; then
+                    DOCKER_INSTALLED=true
+                    log_success "Debian bookworm专用安装成功"
+                fi
+            fi
+
+            # 方案5: 如果都失败了，使用二进制安装
             if [[ "$DOCKER_INSTALLED" == false ]]; then
                 log_warn "所有仓库都失败，使用二进制安装..."
                 install_docker_binary
@@ -1294,6 +1314,42 @@ EOF
     install_docker_compose_binary
 
     log_success "Docker二进制安装完成"
+}
+
+# Debian bookworm专用Docker安装
+install_docker_debian_bookworm() {
+    log_info "使用Debian bookworm专用安装方法..."
+
+    # 清理之前的配置
+    sudo rm -f /etc/apt/sources.list.d/docker.list
+    sudo rm -f /etc/apt/keyrings/docker.gpg
+    sudo mkdir -p /etc/apt/keyrings
+
+    # 添加Docker官方GPG密钥
+    if ! curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg; then
+        log_error "无法下载Docker GPG密钥"
+        return 1
+    fi
+
+    # 添加Docker仓库 - 直接使用bookworm
+    echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+    https://download.docker.com/linux/debian bookworm stable" \
+    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    # 更新包索引
+    if ! sudo apt update; then
+        log_error "apt update失败"
+        return 1
+    fi
+
+    # 安装Docker
+    if ! sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin; then
+        log_error "Docker安装失败"
+        return 1
+    fi
+
+    return 0
 }
 
 # 安装Docker Compose二进制文件
