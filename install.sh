@@ -366,14 +366,16 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
 def get_password_hash(password: str) -> str:
-    # bcrypt 限制最大 72 字节。为避免因环境变量或长密码导致服务崩溃，
-    # 在哈希前按 UTF-8 编码截断到 72 bytes。
     if password is None:
         password = ""
-    b = password.encode("utf-8")[:72]
-    # passlib 的 hash 接受 bytes，因此直接传入截断后的 bytes
-    return pwd_context.hash(b)
+    # pbkdf2_sha256 不受 72 bytes 限制，直接哈希字符串
+    return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -696,14 +698,20 @@ async def admin_get_stats(admin = Depends(get_current_admin), db: Session = Depe
 # Public license API routes
 @app.post("/api/activate", response_model=ActivateResponse)
 @limiter.limit("10/minute")
-async def license_activate(req: ActivateRequest, db: Session = Depends(get_db)):
+async def license_activate(request: Request, req: ActivateRequest, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
     code_hash = make_code_hash(req.activation_code)
     allowed, reason, expires_at = activate_key(db, code_hash, req.machine_code)
     return ActivateResponse(allowed=allowed, expires_at=expires_at.isoformat() if expires_at else None, message=reason)
 
 @app.post("/api/verify", response_model=VerifyResponse)
 @limiter.limit("30/minute")
-async def license_verify(req: VerifyRequest, db: Session = Depends(get_db)):
+async def license_verify(request: Request, req: VerifyRequest, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
     code_hash = make_code_hash(req.activation_code)
     valid, reason, expires_at, bound_hwid = verify_key(db, code_hash, req.machine_code)
     return VerifyResponse(valid=valid, expires_at=expires_at.isoformat() if expires_at else None, bound_hwid=bound_hwid, message=reason)
@@ -1409,6 +1417,40 @@ install_docker_compose_binary() {
     log_success "Docker Compose安装完成"
 }
 
+# 应用运行时修复：把生成的模板复制到部署目录，创建 docker-compose wrapper（兼容 docker compose v2），并修复权限
+apply_runtime_fixes() {
+    log_info "应用运行时修复：复制模板到部署目录并确保 docker-compose 可用"
+
+    PROJECT_DIR="/opt/velyorix-license-server"
+    sudo mkdir -p "$PROJECT_DIR"
+
+    # 复制必要文件（覆盖部署目录）
+    log_info "复制 api/ web/ docker-compose.yml nginx.conf 到 $PROJECT_DIR"
+    sudo rm -rf "$PROJECT_DIR"/api "$PROJECT_DIR"/web "$PROJECT_DIR"/Dockerfile "$PROJECT_DIR"/docker-compose.yml "$PROJECT_DIR"/nginx.conf 2>/dev/null || true
+    sudo cp -r api "$PROJECT_DIR/" || true
+    sudo cp -r web "$PROJECT_DIR/" || true
+    sudo cp Dockerfile "$PROJECT_DIR/" || true
+    sudo cp docker-compose.yml "$PROJECT_DIR/" || true
+    sudo cp nginx.conf "$PROJECT_DIR/" || true
+
+    # 设置权限
+    OWNER="${SUDO_USER:-$(whoami)}"
+    sudo chown -R "$OWNER":"$OWNER" "$PROJECT_DIR"
+
+    # 创建 docker-compose wrapper（如果系统只有 docker compose v2）
+    if ! command -v docker-compose >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
+        log_info "创建 /usr/local/bin/docker-compose wrapper -> docker compose"
+        sudo tee /usr/local/bin/docker-compose > /dev/null <<'EOF'
+#!/bin/bash
+exec docker compose "$@"
+EOF
+        sudo chmod +x /usr/local/bin/docker-compose
+        log_success "已创建 /usr/local/bin/docker-compose"
+    fi
+
+    log_success "运行时修复应用完成"
+}
+
 # 显示菜单
 show_menu() {
     echo ""
@@ -1440,6 +1482,8 @@ full_install() {
     create_api_service
     create_web_interface
     create_docker_config
+    # 在启动服务前把生成的模板复制到部署目录并应用运行时修复（wrapper 等）
+    apply_runtime_fixes
     start_services
     show_installation_info
 
