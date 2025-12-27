@@ -554,9 +554,9 @@ from pydantic import BaseModel
 from typing import Optional, List
 import uvicorn
 
-from models import engine, get_db, Base, AdminUser
+from models import engine, get_db, Base, AdminUser, ActivationKey
 from auth import verify_token, get_password_hash, verify_password, create_access_token
-from license_service import create_activation_key, activate_key, verify_key, disable_key, get_keys_list, get_key_stats, make_code_hash
+from license_service import create_activation_key, activate_key, verify_key, disable_key, get_keys_list, get_key_stats, make_code_hash, bind_key_admin, decrypt_code
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -1621,7 +1621,7 @@ install_docker_compose_binary() {
 show_menu() {
     echo ""
     echo "========================================"
-    echo "🚀 Velyorix License Server 管理菜2"
+    echo "🚀 Velyorix License Server 管理菜3"
     echo "========================================"
     echo "1) 完整安装 (推荐新手)"
     echo "2) 仅安装Docker环境"
