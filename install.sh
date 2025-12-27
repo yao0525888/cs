@@ -250,6 +250,16 @@ install_docker_compose() {
 
         # 验证安装
         if docker compose version >/dev/null 2>&1; then
+            # Ensure compatibility: create docker-compose wrapper if missing
+            if ! command -v docker-compose >/dev/null 2>&1; then
+                log_info "创建 docker-compose wrapper -> docker compose"
+                sudo tee /usr/local/bin/docker-compose > /dev/null <<'EOF'
+#!/bin/bash
+exec docker compose "$@"
+EOF
+                sudo chmod +x /usr/local/bin/docker-compose
+                log_success "已创建 /usr/local/bin/docker-compose (wrapper)"
+            fi
             log_success "Docker Compose安装完成: $(docker compose version)"
         else
             log_error "Docker Compose安装失败，尝试安装独立版本..."
@@ -342,6 +352,7 @@ EOF
     # 创建认证模块
     cat > api/auth.py << 'EOF'
 from datetime import datetime, timedelta
+from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import os
@@ -356,7 +367,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    # bcrypt 限制最大 72 字节。为避免因环境变量或长密码导致服务崩溃，
+    # 在哈希前按 UTF-8 编码截断到 72 bytes。
+    if password is None:
+        password = ""
+    b = password.encode("utf-8")[:72]
+    # passlib 的 hash 接受 bytes，因此直接传入截断后的 bytes
+    return pwd_context.hash(b)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
