@@ -34,13 +34,40 @@ check_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         if command -v apt-get >/dev/null 2>&1; then
             PACKAGE_MANAGER="apt-get"
-            OS="ubuntu"
+            # 检测具体的发行版
+            if [[ -f /etc/debian_version ]]; then
+                if [[ -f /etc/os-release ]]; then
+                    . /etc/os-release
+                    case $ID in
+                        ubuntu)
+                            OS="ubuntu"
+                            DOCKER_REPO="ubuntu"
+                            ;;
+                        debian)
+                            OS="debian"
+                            DOCKER_REPO="debian"
+                            ;;
+                        *)
+                            OS="debian"
+                            DOCKER_REPO="debian"
+                            ;;
+                    esac
+                else
+                    OS="debian"
+                    DOCKER_REPO="debian"
+                fi
+            else
+                OS="ubuntu"
+                DOCKER_REPO="ubuntu"
+            fi
         elif command -v yum >/dev/null 2>&1; then
             PACKAGE_MANAGER="yum"
             OS="centos"
+            DOCKER_REPO="centos"
         elif command -v dnf >/dev/null 2>&1; then
             PACKAGE_MANAGER="dnf"
             OS="fedora"
+            DOCKER_REPO="centos"
         else
             log_error "不支持的Linux发行版"
             exit 1
@@ -61,28 +88,68 @@ install_docker() {
         log_info "安装Docker..."
 
         # 卸载旧版本
-        sudo $PACKAGE_MANAGER remove -y docker docker-engine docker.io containerd runc >/dev/null 2>&1 || true
+        if [[ "$PACKAGE_MANAGER" == "apt-get" ]]; then
+            sudo $PACKAGE_MANAGER remove -y docker docker-engine docker.io containerd runc >/dev/null 2>&1 || true
+        fi
 
-        # 安装依赖
-        sudo $PACKAGE_MANAGER update
-        sudo $PACKAGE_MANAGER install -y ca-certificates curl gnupg lsb-release
+        if [[ "$PACKAGE_MANAGER" == "apt-get" ]]; then
+            # Debian/Ubuntu 安装
+            log_info "为 $OS 配置Docker仓库..."
 
-        # 添加Docker官方GPG密钥
-        sudo mkdir -p /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            # 安装依赖
+            sudo $PACKAGE_MANAGER update
+            sudo $PACKAGE_MANAGER install -y ca-certificates curl gnupg lsb-release
 
-        # 添加Docker仓库
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            # 尝试使用Docker官方仓库
+            log_info "尝试配置Docker官方仓库..."
+            if curl -fsSL https://download.docker.com/linux/$DOCKER_REPO/gpg >/dev/null 2>&1; then
+                # 添加Docker官方GPG密钥
+                sudo mkdir -p /etc/apt/keyrings
+                curl -fsSL https://download.docker.com/linux/$DOCKER_REPO/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-        # 安装Docker
-        sudo $PACKAGE_MANAGER update
-        sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+                # 添加Docker仓库
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$DOCKER_REPO $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            else
+                # 如果官方仓库不可用，使用国内镜像源
+                log_warn "Docker官方仓库不可用，使用国内镜像源..."
+                sudo mkdir -p /etc/apt/keyrings
+                curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            fi
+
+            # 安装Docker
+            sudo $PACKAGE_MANAGER update
+            sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+        elif [[ "$PACKAGE_MANAGER" == "yum" ]] || [[ "$PACKAGE_MANAGER" == "dnf" ]]; then
+            # CentOS/RHEL/Fedora 安装
+            log_info "为 $OS 配置Docker仓库..."
+
+            # 安装依赖
+            sudo $PACKAGE_MANAGER install -y yum-utils
+
+            # 添加Docker仓库
+            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+            # 安装Docker
+            sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        fi
 
         # 启动Docker服务
         sudo systemctl start docker
         sudo systemctl enable docker
 
-        log_success "Docker安装完成"
+        # 添加当前用户到docker组（可选）
+        sudo usermod -aG docker $SUDO_USER 2>/dev/null || true
+
+        # 验证安装
+        if docker --version >/dev/null 2>&1; then
+            log_success "Docker安装完成: $(docker --version)"
+        else
+            log_error "Docker安装失败"
+            exit 1
+        fi
     fi
 }
 
@@ -90,16 +157,31 @@ install_docker() {
 install_docker_compose() {
     log_info "检查Docker Compose安装状态..."
 
-    if command -v docker-compose >/dev/null 2>&1 || docker compose version >/dev/null 2>&1; then
-        log_success "Docker Compose已安装"
+    if docker compose version >/dev/null 2>&1; then
+        log_success "Docker Compose V2已安装: $(docker compose version)"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        log_success "Docker Compose V1已安装: $(docker-compose --version)"
     else
         log_info "安装Docker Compose..."
 
-        # 安装docker-compose
-        sudo $PACKAGE_MANAGER update
-        sudo $PACKAGE_MANAGER install -y docker-compose-plugin
+        if [[ "$PACKAGE_MANAGER" == "apt-get" ]]; then
+            # Docker Compose V2 已经随docker-ce一起安装了
+            log_info "Docker Compose V2 应已随Docker CE一起安装"
+        else
+            # 其他系统可能需要单独安装
+            sudo $PACKAGE_MANAGER install -y docker-compose-plugin
+        fi
 
-        log_success "Docker Compose安装完成"
+        # 验证安装
+        if docker compose version >/dev/null 2>&1; then
+            log_success "Docker Compose安装完成: $(docker compose version)"
+        else
+            log_error "Docker Compose安装失败，尝试安装独立版本..."
+            # 安装独立版本作为后备方案
+            sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            log_success "Docker Compose独立版本安装完成"
+        fi
     fi
 }
 
@@ -1051,11 +1133,45 @@ show_installation_info() {
     echo ""
 }
 
-# 主函数
-main() {
-    echo "🚀 Velyorix License Server 一键安装脚本"
-    echo "========================================"
+# 旧的主函数已移除，由新的菜单驱动主函数替代
 
+# 检查网络连接
+check_network() {
+    log_info "检查网络连接..."
+
+    if curl -fsSL --connect-timeout 10 https://www.google.com >/dev/null 2>&1; then
+        log_success "网络连接正常"
+    elif curl -fsSL --connect-timeout 10 https://www.baidu.com >/dev/null 2>&1; then
+        log_success "网络连接正常（国内网络）"
+    else
+        log_warn "网络连接可能较慢，请耐心等待..."
+    fi
+}
+
+# 显示菜单
+show_menu() {
+    echo ""
+    echo "========================================"
+    echo "🚀 Velyorix License Server 管理菜单"
+    echo "========================================"
+    echo "1) 完整安装 (推荐新手)"
+    echo "2) 仅安装Docker环境"
+    echo "3) 查看服务状态"
+    echo "4) 启动服务"
+    echo "5) 停止服务"
+    echo "6) 重启服务"
+    echo "7) 查看日志"
+    echo "8) 卸载服务"
+    echo "9) 退出"
+    echo "========================================"
+    echo ""
+}
+
+# 完整安装流程
+full_install() {
+    log_info "开始完整安装流程..."
+
+    check_network
     check_os
     install_docker
     install_docker_compose
@@ -1065,28 +1181,246 @@ main() {
     create_docker_config
     start_services
     show_installation_info
+
+    log_success "完整安装完成！"
+}
+
+# 仅安装Docker
+install_docker_only() {
+    log_info "开始安装Docker环境..."
+
+    check_os
+    install_docker
+    install_docker_compose
+
+    log_success "Docker环境安装完成！"
+    echo ""
+    echo "现在你可以运行其他选项来管理服务。"
+}
+
+# 查看服务状态
+check_service_status() {
+    log_info "检查服务状态..."
+
+    if [[ -f "/opt/velyorix-license-server/docker-compose.yml" ]]; then
+        cd /opt/velyorix-license-server
+
+        echo "Docker服务状态:"
+        sudo systemctl status docker --no-pager -l | head -10
+
+        echo ""
+        echo "容器状态:"
+        if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose ps
+        elif docker compose version >/dev/null 2>&1; then
+            docker compose ps
+        else
+            echo "Docker Compose未安装"
+        fi
+
+        echo ""
+        echo "服务健康检查:"
+        if curl -f http://localhost/api/health >/dev/null 2>&1; then
+            echo "✅ API服务正常"
+        else
+            echo "❌ API服务异常"
+        fi
+
+        if curl -f http://localhost >/dev/null 2>&1; then
+            echo "✅ Web服务正常"
+        else
+            echo "❌ Web服务异常"
+        fi
+    else
+        log_error "服务未安装，请先选择选项1进行完整安装"
+    fi
+}
+
+# 启动服务
+start_service() {
+    log_info "启动服务..."
+
+    if [[ -f "/opt/velyorix-license-server/docker-compose.yml" ]]; then
+        cd /opt/velyorix-license-server
+
+        if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose up -d
+        else
+            docker compose up -d
+        fi
+
+        log_success "服务启动完成"
+        sleep 3
+        check_service_status
+    else
+        log_error "服务未安装，请先选择选项1进行完整安装"
+    fi
+}
+
+# 停止服务
+stop_service() {
+    log_info "停止服务..."
+
+    if [[ -f "/opt/velyorix-license-server/docker-compose.yml" ]]; then
+        cd /opt/velyorix-license-server
+
+        if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose down
+        else
+            docker compose down
+        fi
+
+        log_success "服务已停止"
+    else
+        log_error "服务未安装"
+    fi
+}
+
+# 重启服务
+restart_service() {
+    log_info "重启服务..."
+    stop_service
+    sleep 2
+    start_service
+}
+
+# 查看日志
+view_logs() {
+    log_info "查看服务日志..."
+
+    if [[ -f "/opt/velyorix-license-server/docker-compose.yml" ]]; then
+        cd /opt/velyorix-license-server
+
+        echo "选择要查看的日志:"
+        echo "1) API服务日志"
+        echo "2) Web服务日志"
+        echo "3) 所有服务日志"
+        echo "4) 返回菜单"
+        read -p "请选择 (1-4): " log_choice
+
+        case $log_choice in
+            1)
+                if command -v docker-compose >/dev/null 2>&1; then
+                    docker-compose logs -f velyorix-license-server
+                else
+                    docker compose logs -f velyorix-license-server
+                fi
+                ;;
+            2)
+                if command -v docker-compose >/dev/null 2>&1; then
+                    docker-compose logs -f nginx
+                else
+                    docker compose logs -f nginx
+                fi
+                ;;
+            3)
+                if command -v docker-compose >/dev/null 2>&1; then
+                    docker-compose logs -f
+                else
+                    docker compose logs -f
+                fi
+                ;;
+            4)
+                return
+                ;;
+            *)
+                log_error "无效选择"
+                ;;
+        esac
+    else
+        log_error "服务未安装"
+    fi
+}
+
+# 卸载服务
+uninstall_service() {
+    log_warn "⚠️  卸载将删除所有数据和服务文件！"
+    read -p "确定要卸载Velyorix License Server吗？(输入 'yes' 确认): " confirm
+
+    if [[ "$confirm" != "yes" ]]; then
+        log_info "卸载已取消"
+        return
+    fi
+
+    log_info "开始卸载服务..."
+
+    # 停止并删除容器
+    if [[ -d "/opt/velyorix-license-server" ]]; then
+        cd /opt/velyorix-license-server
+
+        if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose down -v 2>/dev/null || true
+        elif docker compose version >/dev/null 2>&1; then
+            docker compose down -v 2>/dev/null || true
+        fi
+    fi
+
+    # 删除项目目录
+    sudo rm -rf /opt/velyorix-license-server
+
+    # 删除Docker镜像（可选）
+    read -p "是否删除Docker镜像？(y/N): " delete_images
+    if [[ "$delete_images" == "y" ]] || [[ "$delete_images" == "Y" ]]; then
+        docker rmi $(docker images -q velyorix-license-server) 2>/dev/null || true
+        docker rmi nginx:alpine 2>/dev/null || true
+    fi
+
+    log_success "服务卸载完成"
 }
 
 # 主函数
 main() {
-    echo "🚀 Velyorix License Server 一键安装脚本"
-    echo "========================================"
-
     # 检查是否为root用户
     if [[ $EUID -ne 0 ]]; then
         log_error "请使用 root 用户运行此脚本：sudo $0"
         exit 1
     fi
 
-    check_os
-    install_docker
-    install_docker_compose
-    create_project
-    create_api_service
-    create_web_interface
-    create_docker_config
-    start_services
-    show_installation_info
+    while true; do
+        echo "🚀 Velyorix License Server 一键安装脚本"
+        echo "========================================"
+        show_menu
+
+        read -p "请选择操作 (1-9): " choice
+
+        case $choice in
+            1)
+                full_install
+                ;;
+            2)
+                install_docker_only
+                ;;
+            3)
+                check_service_status
+                ;;
+            4)
+                start_service
+                ;;
+            5)
+                stop_service
+                ;;
+            6)
+                restart_service
+                ;;
+            7)
+                view_logs
+                ;;
+            8)
+                uninstall_service
+                ;;
+            9)
+                log_info "再见！"
+                exit 0
+                ;;
+            *)
+                log_error "无效选择，请重新输入"
+                ;;
+        esac
+
+        echo ""
+        read -p "按回车键继续..."
+        clear
+    done
 }
 
 # 如果脚本被直接执行
