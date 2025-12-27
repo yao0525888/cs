@@ -322,6 +322,7 @@ class ActivationKey(Base):
     bound_hwid = Column(String(256), nullable=True)
     status = Column(String(32), nullable=False, default="active")  # active / disabled / expired
     notes = Column(Text, nullable=True)
+    encrypted_code = Column(String(512), nullable=True)  # AES/Fernet encrypted activation code
 
 class AdminUser(Base):
     __tablename__ = "admin_users"
@@ -394,8 +395,26 @@ import hashlib
 from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 from models import ActivationKey
+from cryptography.fernet import Fernet
+import hashlib
+import base64
 
-SERVER_SECRET = "velyorix-server-secret-2024"
+SERVER_SECRET = os.getenv("SERVER_SECRET", "change_me_server_secret")
+
+def _get_fernet() -> Fernet:
+    # derive 32-byte key from SERVER_SECRET
+    key = hashlib.sha256(SERVER_SECRET.encode("utf-8")).digest()
+    fkey = base64.urlsafe_b64encode(key)
+    return Fernet(fkey)
+
+def encrypt_code(plaintext: str) -> str:
+    f = _get_fernet()
+    token = f.encrypt(plaintext.encode("utf-8"))
+    return token.decode("utf-8")
+
+def decrypt_code(token_str: str) -> str:
+    f = _get_fernet()
+    return f.decrypt(token_str.encode("utf-8")).decode("utf-8")
 
 def make_code_hash(code: str) -> str:
     digest = hmac.new(SERVER_SECRET.encode("utf-8"), code.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -409,9 +428,10 @@ def create_activation_key(db: Session, valid_days: int = 365, notes: Optional[st
     code_hash = make_code_hash(code)
     now = datetime.datetime.utcnow()
     expires_at = now + datetime.timedelta(days=valid_days) if valid_days and valid_days > 0 else None
-
+    encrypted = encrypt_code(code)
     db_key = ActivationKey(
         code_hash=code_hash,
+        encrypted_code=encrypted,
         expires_at=expires_at,
         notes=notes,
         status="active"
@@ -474,6 +494,25 @@ def disable_key(db: Session, key_id: int) -> bool:
     key.status = "disabled"
     db.commit()
     return True
+
+def bind_key_admin(db: Session, key_id: int, hwid: str) -> Tuple[bool, str]:
+    """
+    Admin binds a key to a HWID directly.
+    Returns (success, reason)
+    """
+    key = db.query(ActivationKey).filter(ActivationKey.id == key_id).first()
+    if not key:
+        return False, "invalid_key"
+    if key.status != "active":
+        return False, "disabled"
+    if key.bound_hwid:
+        if key.bound_hwid == hwid:
+            return True, "already_bound_same"
+        else:
+            return False, "bound_to_other"
+    key.bound_hwid = hwid
+    db.commit()
+    return True, "bound_now"
 
 def get_keys_list(db: Session, page: int = 1, per_page: int = 20) -> Tuple[list, int]:
     from sqlalchemy import func as sql_func
@@ -676,6 +715,60 @@ async def admin_disable_key(req: DisableKeyRequest, admin = Depends(get_current_
     if not success:
         raise HTTPException(status_code=404, detail="Key not found")
     return {"message": "Key disabled successfully"}
+
+class BindKeyRequest(BaseModel):
+    key_id: int
+    hwid: str
+
+@app.post("/api/admin/bind_key")
+async def admin_bind_key(req: BindKeyRequest, admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    success, reason = bind_key_admin(db, req.key_id, req.hwid)
+    if not success:
+        raise HTTPException(status_code=400, detail=reason)
+    return {"message": reason}
+
+# 管理：编辑激活码（到期时间 / 备注 / 状态）
+class EditKeyRequest(BaseModel):
+    key_id: int
+    expires_at: Optional[str] = None  # ISO string or null
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
+@app.post("/api/admin/edit_key")
+async def admin_edit_key(req: EditKeyRequest, admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    key = db.query(ActivationKey).filter(ActivationKey.id == req.key_id).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Key not found")
+    # parse expires_at
+    if req.expires_at:
+        try:
+            key.expires_at = datetime.datetime.fromisoformat(req.expires_at)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid_expires_at")
+    else:
+        key.expires_at = None
+    if req.notes is not None:
+        key.notes = req.notes
+    if req.status is not None:
+        if req.status not in ("active","disabled","expired"):
+            raise HTTPException(status_code=400, detail="invalid_status")
+        key.status = req.status
+    db.commit()
+    return {"message":"edited"}
+
+# 管理：显示解密后的激活码（仅管理员可见）
+@app.get("/api/admin/key/{key_id}/reveal")
+async def admin_reveal_key(key_id: int, admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    key = db.query(ActivationKey).filter(ActivationKey.id == key_id).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Key not found")
+    if not key.encrypted_code:
+        raise HTTPException(status_code=404, detail="no_code_stored")
+    try:
+        code = decrypt_code(key.encrypted_code)
+    except Exception:
+        raise HTTPException(status_code=500, detail="decrypt_failed")
+    return {"activation_code": code}
 
 @app.get("/api/admin/stats", response_model=StatsResponse)
 async def admin_get_stats(admin = Depends(get_current_admin), db: Session = Depends(get_db)):
@@ -1022,6 +1115,64 @@ create_web_interface() {
             navigator.clipboard.writeText(code).then(() => alert('已复制'));
         }
 
+        // 编辑模态框相关
+        function openEditModal(keyId) {
+            // 获取当前行数据从表格（简单从 DOM 读取）
+            const bound = document.getElementById(`bound-${keyId}`).textContent || '';
+            // 显示模态（简单 prompt 实现以避免额外 UI 复杂度）
+            const newExpires = prompt('输入新的过期时间 (ISO, 留空表示永久)', '');
+            if (newExpires === null) return;
+            const newNotes = prompt('输入备注 (留空忽略)', '');
+            const newStatus = prompt('状态 (active/disabled/expired)', 'active');
+            // 发送更新请求
+            saveEditKey(keyId, newExpires, newNotes, newStatus);
+        }
+
+        async function saveEditKey(keyId, expiresAt, notes, status) {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/edit_key`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: JSON.stringify({ key_id: keyId, expires_at: expiresAt || null, notes: notes || null, status })
+                });
+                if (response.ok) {
+                    alert('保存成功');
+                    loadKeys(currentPage);
+                    loadDashboard();
+                } else {
+                    const data = await response.json();
+                    alert('保存失败: ' + (data.detail || data.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('网络错误');
+            }
+        }
+
+        async function revealCode(keyId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/key/${keyId}/reveal`, {
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    // 显示并复制
+                    const code = data.activation_code;
+                    navigator.clipboard.writeText(code).then(()=>{});
+                    alert('激活码: ' + code + '\\n(已复制到剪贴板)');
+                } else {
+                    const err = await response.json();
+                    alert('无法显示激活码: ' + (err.detail || err.message || '未知错误'));
+                }
+            } catch (e) {
+                alert('网络错误');
+            }
+        }
+
         async function loadKeys(page = 1) {
             currentPage = page;
             try {
@@ -1040,6 +1191,39 @@ create_web_interface() {
             }
         }
 
+        async function bindKey(keyId) {
+            const hwid = document.getElementById(`hwid-${keyId}`).value.trim();
+            if (!hwid) {
+                alert('请输入要绑定的机器码 (HWID)');
+                return;
+            }
+            if (!confirm(`确认将激活码 ${keyId} 绑定到机器 ${hwid} 吗？`)) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/bind_key`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: JSON.stringify({ key_id: keyId, hwid })
+                });
+
+                if (response.ok) {
+                    document.getElementById(`bound-${keyId}`).textContent = hwid;
+                    alert('绑定成功');
+                    loadDashboard();
+                } else if (response.status === 401) {
+                    logout();
+                } else {
+                    const data = await response.json();
+                    alert('绑定失败: ' + (data.detail || data.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('网络错误');
+            }
+        }
+
         function displayKeys(data) {
             const tbody = document.getElementById('keys-tbody');
             tbody.innerHTML = '';
@@ -1054,12 +1238,18 @@ create_web_interface() {
                         <td>${key.id}</td>
                         <td>${createdAt}</td>
                         <td>${expiresAt}</td>
-                        <td><code>${key.bound_hwid || '-'}</code></td>
-                        <td>${statusBadge}</td>
-                        <td>${key.notes || '-'}</td>
-                        <td>
-                            ${key.status === 'active' ? `<button class="btn btn-sm btn-outline-danger" onclick="disableKey(${key.id})">禁用</button>` : '-'}
-                        </td>
+                <td><code id="bound-${key.id}">${key.bound_hwid || '-'}</code></td>
+                <td>${statusBadge}</td>
+                <td>${key.notes || '-'}</td>
+                <td>
+                    <div class="d-flex gap-2">
+                        ${key.status === 'active' ? `<button class="btn btn-sm btn-outline-danger" onclick="disableKey(${key.id})">禁用</button>` : '<span class="text-muted">-</span>'}
+                        <button class="btn btn-sm btn-secondary" onclick="openEditModal(${key.id})">编辑</button>
+                        <button class="btn btn-sm btn-outline-info" onclick="revealCode(${key.id})">显示</button>
+                        <input type="text" id="hwid-${key.id}" class="form-control form-control-sm" placeholder="输入HWID" style="width:160px;">
+                        <button class="btn btn-sm btn-primary" onclick="bindKey(${key.id})">绑定</button>
+                    </div>
+                </td>
                     </tr>
                 `;
                 tbody.innerHTML += row;
