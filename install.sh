@@ -250,16 +250,6 @@ install_docker_compose() {
 
         # 验证安装
         if docker compose version >/dev/null 2>&1; then
-            # Ensure compatibility: create docker-compose wrapper if missing
-            if ! command -v docker-compose >/dev/null 2>&1; then
-                log_info "创建 docker-compose wrapper -> docker compose"
-                sudo tee /usr/local/bin/docker-compose > /dev/null <<'EOF'
-#!/bin/bash
-exec docker compose "$@"
-EOF
-                sudo chmod +x /usr/local/bin/docker-compose
-                log_success "已创建 /usr/local/bin/docker-compose (wrapper)"
-            fi
             log_success "Docker Compose安装完成: $(docker compose version)"
         else
             log_error "Docker Compose安装失败，尝试安装独立版本..."
@@ -352,7 +342,6 @@ EOF
     # 创建认证模块
     cat > api/auth.py << 'EOF'
 from datetime import datetime, timedelta
-from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import os
@@ -366,15 +355,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
 def get_password_hash(password: str) -> str:
-    if password is None:
-        password = ""
-    # pbkdf2_sha256 不受 72 bytes 限制，直接哈希字符串
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
@@ -698,20 +679,14 @@ async def admin_get_stats(admin = Depends(get_current_admin), db: Session = Depe
 # Public license API routes
 @app.post("/api/activate", response_model=ActivateResponse)
 @limiter.limit("10/minute")
-async def license_activate(request: Request, req: ActivateRequest, db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-
+async def license_activate(req: ActivateRequest, db: Session = Depends(get_db)):
     code_hash = make_code_hash(req.activation_code)
     allowed, reason, expires_at = activate_key(db, code_hash, req.machine_code)
     return ActivateResponse(allowed=allowed, expires_at=expires_at.isoformat() if expires_at else None, message=reason)
 
 @app.post("/api/verify", response_model=VerifyResponse)
 @limiter.limit("30/minute")
-async def license_verify(request: Request, req: VerifyRequest, db: Session = Depends(get_db)):
-    client_ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent")
-
+async def license_verify(req: VerifyRequest, db: Session = Depends(get_db)):
     code_hash = make_code_hash(req.activation_code)
     valid, reason, expires_at, bound_hwid = verify_key(db, code_hash, req.machine_code)
     return VerifyResponse(valid=valid, expires_at=expires_at.isoformat() if expires_at else None, bound_hwid=bound_hwid, message=reason)
@@ -1417,78 +1392,11 @@ install_docker_compose_binary() {
     log_success "Docker Compose安装完成"
 }
 
-# 应用运行时修复：把生成的模板复制到部署目录，创建 docker-compose wrapper（兼容 docker compose v2），并修复权限
-apply_runtime_fixes() {
-    log_info "应用运行时修复：复制模板到部署目录并确保 docker-compose 可用"
-
-    PROJECT_DIR="/opt/velyorix-license-server"
-    sudo mkdir -p "$PROJECT_DIR"
-
-    # 复制必要文件（覆盖部署目录）
-    log_info "复制 api/ web/ docker-compose.yml nginx.conf 到 $PROJECT_DIR"
-    # 确定脚本所在目录作为源目录（兼容被 source /dev/fd/ 运行的情况）
-    if [[ -n "${BASH_SOURCE[0]}" ]]; then
-        SRC_CAND="${BASH_SOURCE[0]}"
-    else
-        SRC_CAND="$0"
-    fi
-    # 如果脚本来自 /dev/fd 或 proc 等不可直接定位的位置，回退到当前工作目录
-    if [[ "$SRC_CAND" == /dev/fd/* ]] || [[ "$SRC_CAND" == /proc/* ]] || [[ ! -e "$SRC_CAND" ]]; then
-        SRC_DIR="$(pwd)"
-    else
-        SRC_DIR="$(cd "$(dirname "$SRC_CAND")" >/dev/null 2>&1 && pwd || pwd)"
-    fi
-
-    sudo rm -rf "$PROJECT_DIR"/api "$PROJECT_DIR"/web "$PROJECT_DIR"/Dockerfile "$PROJECT_DIR"/docker-compose.yml "$PROJECT_DIR"/nginx.conf 2>/dev/null || true
-    if [[ -d "$SRC_DIR/api" ]]; then
-        sudo cp -r "$SRC_DIR/api" "$PROJECT_DIR/" || true
-    else
-        log_warn "源目录不存在：$SRC_DIR/api，跳过复制 api/"
-    fi
-    if [[ -d "$SRC_DIR/web" ]]; then
-        sudo cp -r "$SRC_DIR/web" "$PROJECT_DIR/" || true
-    else
-        log_warn "源目录不存在：$SRC_DIR/web，跳过复制 web/"
-    fi
-    if [[ -f "$SRC_DIR/Dockerfile" ]]; then
-        sudo cp "$SRC_DIR/Dockerfile" "$PROJECT_DIR/" || true
-    else
-        log_warn "源文件不存在：$SRC_DIR/Dockerfile，跳过复制 Dockerfile"
-    fi
-    if [[ -f "$SRC_DIR/docker-compose.yml" ]]; then
-        sudo cp "$SRC_DIR/docker-compose.yml" "$PROJECT_DIR/" || true
-    else
-        log_warn "源文件不存在：$SRC_DIR/docker-compose.yml，跳过复制 docker-compose.yml"
-    fi
-    if [[ -f "$SRC_DIR/nginx.conf" ]]; then
-        sudo cp "$SRC_DIR/nginx.conf" "$PROJECT_DIR/" || true
-    else
-        log_warn "源文件不存在：$SRC_DIR/nginx.conf，跳过复制 nginx.conf"
-    fi
-
-    # 设置权限
-    OWNER="${SUDO_USER:-$(whoami)}"
-    sudo chown -R "$OWNER":"$OWNER" "$PROJECT_DIR"
-
-    # 创建 docker-compose wrapper（如果系统只有 docker compose v2）
-    if ! command -v docker-compose >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
-        log_info "创建 /usr/local/bin/docker-compose wrapper -> docker compose"
-        sudo tee /usr/local/bin/docker-compose > /dev/null <<'EOF'
-#!/bin/bash
-exec docker compose "$@"
-EOF
-        sudo chmod +x /usr/local/bin/docker-compose
-        log_success "已创建 /usr/local/bin/docker-compose"
-    fi
-
-    log_success "运行时修复应用完成"
-}
-
 # 显示菜单
 show_menu() {
     echo ""
     echo "========================================"
-    echo "🚀 Velyorix License Server 管单"
+    echo "🚀 Velyorix License Server 管理菜单"
     echo "========================================"
     echo "1) 完整安装 (推荐新手)"
     echo "2) 仅安装Docker环境"
@@ -1515,8 +1423,6 @@ full_install() {
     create_api_service
     create_web_interface
     create_docker_config
-    # 在启动服务前把生成的模板复制到部署目录并应用运行时修复（wrapper 等）
-    apply_runtime_fixes
     start_services
     show_installation_info
 
