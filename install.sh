@@ -34,32 +34,47 @@ check_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         if command -v apt-get >/dev/null 2>&1; then
             PACKAGE_MANAGER="apt-get"
+
             # 检测具体的发行版
-            if [[ -f /etc/debian_version ]]; then
-                if [[ -f /etc/os-release ]]; then
-                    . /etc/os-release
-                    case $ID in
-                        ubuntu)
-                            OS="ubuntu"
-                            DOCKER_REPO="ubuntu"
-                            ;;
-                        debian)
-                            OS="debian"
-                            DOCKER_REPO="debian"
-                            ;;
-                        *)
-                            OS="debian"
-                            DOCKER_REPO="debian"
-                            ;;
-                    esac
-                else
-                    OS="debian"
-                    DOCKER_REPO="debian"
-                fi
+            if [[ -f /etc/os-release ]]; then
+                . /etc/os-release
+                case $ID in
+                    ubuntu)
+                        OS="ubuntu"
+                        DOCKER_REPO="ubuntu"
+                        ;;
+                    debian)
+                        OS="debian"
+                        DOCKER_REPO="debian"
+                        ;;
+                    linuxmint|elementary|zorin|pop)
+                        # 基于Ubuntu的发行版
+                        OS="ubuntu"
+                        DOCKER_REPO="ubuntu"
+                        ;;
+                    raspbian)
+                        # 树莓派系统，基于Debian
+                        OS="debian"
+                        DOCKER_REPO="debian"
+                        ;;
+                    *)
+                        # 未知的基于apt的系统，尝试使用debian仓库
+                        log_warn "未知的apt-based系统 $ID，尝试使用Debian配置"
+                        OS="debian"
+                        DOCKER_REPO="debian"
+                        ;;
+                esac
+            elif [[ -f /etc/debian_version ]]; then
+                # 没有os-release但有debian_version的系统
+                OS="debian"
+                DOCKER_REPO="debian"
             else
+                # 最后的回退方案
+                log_warn "无法确定具体的Linux发行版，假设为Ubuntu兼容系统"
                 OS="ubuntu"
                 DOCKER_REPO="ubuntu"
             fi
+
         elif command -v yum >/dev/null 2>&1; then
             PACKAGE_MANAGER="yum"
             OS="centos"
@@ -76,6 +91,10 @@ check_os() {
         log_error "此脚本仅支持Linux系统"
         exit 1
     fi
+
+    log_info "检测到系统: $OS ($ID ${VERSION_ID:-unknown})"
+    log_info "包管理器: $PACKAGE_MANAGER"
+    log_info "Docker仓库: $DOCKER_REPO"
 }
 
 # 安装Docker
@@ -98,29 +117,66 @@ install_docker() {
 
             # 安装依赖
             sudo $PACKAGE_MANAGER update
-            sudo $PACKAGE_MANAGER install -y ca-certificates curl gnupg lsb-release
+            sudo $PACKAGE_MANAGER install -y ca-certificates curl gnupg lsb-release wget apt-transport-https
 
-            # 尝试使用Docker官方仓库
-            log_info "尝试配置Docker官方仓库..."
-            if curl -fsSL https://download.docker.com/linux/$DOCKER_REPO/gpg >/dev/null 2>&1; then
-                # 添加Docker官方GPG密钥
+            # 获取系统版本
+            SYSTEM_CODENAME=$(lsb_release -cs 2>/dev/null || echo "focal")
+
+            # 多重回退方案安装Docker
+            DOCKER_INSTALLED=false
+
+            # 方案1: 尝试Docker官方仓库
+            log_info "方案1: 尝试Docker官方仓库..."
+            if curl -fsSL --connect-timeout 10 https://download.docker.com/linux/$DOCKER_REPO/gpg >/dev/null 2>&1; then
                 sudo mkdir -p /etc/apt/keyrings
                 curl -fsSL https://download.docker.com/linux/$DOCKER_REPO/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$DOCKER_REPO $SYSTEM_CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-                # 添加Docker仓库
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$DOCKER_REPO $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-            else
-                # 如果官方仓库不可用，使用国内镜像源
-                log_warn "Docker官方仓库不可用，使用国内镜像源..."
-                sudo mkdir -p /etc/apt/keyrings
-                curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-
-                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                if sudo $PACKAGE_MANAGER update && sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin; then
+                    DOCKER_INSTALLED=true
+                    log_success "Docker官方仓库安装成功"
+                fi
             fi
 
-            # 安装Docker
-            sudo $PACKAGE_MANAGER update
-            sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+            # 方案2: 如果官方仓库失败，尝试阿里云镜像
+            if [[ "$DOCKER_INSTALLED" == false ]]; then
+                log_warn "官方仓库安装失败，尝试阿里云镜像源..."
+                sudo rm -f /etc/apt/sources.list.d/docker.list
+                sudo mkdir -p /etc/apt/keyrings
+
+                if curl -fsSL --connect-timeout 10 https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO/gpg >/dev/null 2>&1; then
+                    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/$DOCKER_REPO $SYSTEM_CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+                    if sudo $PACKAGE_MANAGER update && sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin; then
+                        DOCKER_INSTALLED=true
+                        log_success "阿里云镜像源安装成功"
+                    fi
+                fi
+            fi
+
+            # 方案3: 如果还是失败，使用清华大学镜像源
+            if [[ "$DOCKER_INSTALLED" == false ]]; then
+                log_warn "阿里云镜像源失败，尝试清华大学镜像源..."
+                sudo rm -f /etc/apt/sources.list.d/docker.list
+                sudo mkdir -p /etc/apt/keyrings
+
+                if curl -fsSL --connect-timeout 10 https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/$DOCKER_REPO/gpg >/dev/null 2>&1; then
+                    curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/$DOCKER_REPO/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/$DOCKER_REPO $SYSTEM_CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+                    if sudo $PACKAGE_MANAGER update && sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin; then
+                        DOCKER_INSTALLED=true
+                        log_success "清华大学镜像源安装成功"
+                    fi
+                fi
+            fi
+
+            # 方案4: 如果都失败了，使用二进制安装
+            if [[ "$DOCKER_INSTALLED" == false ]]; then
+                log_warn "所有仓库都失败，使用二进制安装..."
+                install_docker_binary
+            fi
 
         elif [[ "$PACKAGE_MANAGER" == "yum" ]] || [[ "$PACKAGE_MANAGER" == "dnf" ]]; then
             # CentOS/RHEL/Fedora 安装
@@ -1148,11 +1204,138 @@ check_network() {
     fi
 }
 
+# 二进制安装Docker（最后的回退方案）
+install_docker_binary() {
+    log_info "使用二进制方式安装Docker..."
+
+    # 创建临时目录
+    TMP_DIR=$(mktemp -d)
+    cd $TMP_DIR
+
+    # 获取最新版本
+    DOCKER_VERSION=$(curl -s https://api.github.com/repos/docker/docker/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/v//')
+
+    if [[ -z "$DOCKER_VERSION" ]]; then
+        DOCKER_VERSION="24.0.7"  # 默认版本
+    fi
+
+    log_info "下载Docker $DOCKER_VERSION..."
+
+    # 下载Docker二进制文件
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64)
+            DOCKER_ARCH="x86_64"
+            ;;
+        aarch64)
+            DOCKER_ARCH="aarch64"
+            ;;
+        armv7l)
+            DOCKER_ARCH="armv7"
+            ;;
+        *)
+            log_error "不支持的架构: $ARCH"
+            return 1
+            ;;
+    esac
+
+    # 下载Docker静态二进制文件
+    if ! wget -q "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_VERSION}.tgz"; then
+        log_error "下载Docker二进制文件失败"
+        return 1
+    fi
+
+    # 解压并安装
+    tar xzvf docker-${DOCKER_VERSION}.tgz
+    sudo cp docker/* /usr/bin/
+    sudo chmod +x /usr/bin/docker
+
+    # 创建Docker组
+    sudo groupadd docker 2>/dev/null || true
+
+    # 创建systemd服务文件
+    cat > /tmp/docker.service << 'EOF'
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target firewalld.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/dockerd
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+StartLimitBurst=3
+StartLimitInterval=60s
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo cp /tmp/docker.service /etc/systemd/system/docker.service
+    sudo systemctl daemon-reload
+    sudo systemctl start docker
+    sudo systemctl enable docker
+
+    # 清理临时文件
+    cd /
+    rm -rf $TMP_DIR
+
+    # 安装Docker Compose二进制文件
+    install_docker_compose_binary
+
+    log_success "Docker二进制安装完成"
+}
+
+# 安装Docker Compose二进制文件
+install_docker_compose_binary() {
+    log_info "安装Docker Compose..."
+
+    # 获取最新版本
+    COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+
+    if [[ -z "$COMPOSE_VERSION" ]]; then
+        COMPOSE_VERSION="v2.20.0"  # 默认版本
+    fi
+
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64)
+            COMPOSE_ARCH="x86_64"
+            ;;
+        aarch64)
+            COMPOSE_ARCH="aarch64"
+            ;;
+        armv7l)
+            COMPOSE_ARCH="armv7"
+            ;;
+        *)
+            log_warn "跳过Docker Compose安装：不支持的架构 $ARCH"
+            return 0
+            ;;
+    esac
+
+    # 下载并安装
+    sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-${COMPOSE_ARCH}" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+
+    log_success "Docker Compose安装完成"
+}
+
 # 显示菜单
 show_menu() {
     echo ""
     echo "========================================"
-    echo "🚀 Velyorix License Server 管理菜单"
+    echo "🚀 Velyorix License Server 管理菜单1
     echo "========================================"
     echo "1) 完整安装 (推荐新手)"
     echo "2) 仅安装Docker环境"
