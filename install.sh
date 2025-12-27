@@ -1335,7 +1335,7 @@ install_docker_compose_binary() {
 show_menu() {
     echo ""
     echo "========================================"
-    echo "🚀 Velyorix License Server 管理菜单1
+    echo "🚀 Velyorix License Server 管理菜单"
     echo "========================================"
     echo "1) 完整安装 (推荐新手)"
     echo "2) 仅安装Docker环境"
