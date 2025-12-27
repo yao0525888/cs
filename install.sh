@@ -1,0 +1,1095 @@
+#!/bin/bash
+
+# Velyorix License Server 一键安装脚本
+# 执行方式: curl -fsSL https://your-domain.com/install.sh | bash
+# 或者下载后: chmod +x install.sh && ./install.sh
+
+set -e
+
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 检查操作系统
+check_os() {
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            PACKAGE_MANAGER="apt-get"
+            OS="ubuntu"
+        elif command -v yum >/dev/null 2>&1; then
+            PACKAGE_MANAGER="yum"
+            OS="centos"
+        elif command -v dnf >/dev/null 2>&1; then
+            PACKAGE_MANAGER="dnf"
+            OS="fedora"
+        else
+            log_error "不支持的Linux发行版"
+            exit 1
+        fi
+    else
+        log_error "此脚本仅支持Linux系统"
+        exit 1
+    fi
+}
+
+# 安装Docker
+install_docker() {
+    log_info "检查Docker安装状态..."
+
+    if command -v docker >/dev/null 2>&1; then
+        log_success "Docker已安装"
+    else
+        log_info "安装Docker..."
+
+        # 卸载旧版本
+        sudo $PACKAGE_MANAGER remove -y docker docker-engine docker.io containerd runc >/dev/null 2>&1 || true
+
+        # 安装依赖
+        sudo $PACKAGE_MANAGER update
+        sudo $PACKAGE_MANAGER install -y ca-certificates curl gnupg lsb-release
+
+        # 添加Docker官方GPG密钥
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+        # 添加Docker仓库
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        # 安装Docker
+        sudo $PACKAGE_MANAGER update
+        sudo $PACKAGE_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+        # 启动Docker服务
+        sudo systemctl start docker
+        sudo systemctl enable docker
+
+        log_success "Docker安装完成"
+    fi
+}
+
+# 安装docker-compose
+install_docker_compose() {
+    log_info "检查Docker Compose安装状态..."
+
+    if command -v docker-compose >/dev/null 2>&1 || docker compose version >/dev/null 2>&1; then
+        log_success "Docker Compose已安装"
+    else
+        log_info "安装Docker Compose..."
+
+        # 安装docker-compose
+        sudo $PACKAGE_MANAGER update
+        sudo $PACKAGE_MANAGER install -y docker-compose-plugin
+
+        log_success "Docker Compose安装完成"
+    fi
+}
+
+# 创建项目目录
+create_project() {
+    log_info "创建Velyorix License Server项目..."
+
+    PROJECT_DIR="/opt/velyorix-license-server"
+    sudo mkdir -p $PROJECT_DIR
+    sudo chown $USER:$USER $PROJECT_DIR
+
+    cd $PROJECT_DIR
+
+    # 创建目录结构
+    mkdir -p api web data
+
+    log_success "项目目录创建完成: $PROJECT_DIR"
+}
+
+# 创建Python API服务
+create_api_service() {
+    log_info "创建API服务..."
+
+    # 创建requirements.txt
+    cat > api/requirements.txt << 'EOF'
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+alembic==1.12.1
+pydantic==2.5.0
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.0
+slowapi==0.1.9
+aiosqlite==0.19.0
+jinja2==3.1.2
+aiofiles==23.2.1
+EOF
+
+    # 创建数据库模型
+    cat > api/models.py << 'EOF'
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, MetaData, create_engine
+from sqlalchemy.sql import func
+from sqlalchemy.orm import sessionmaker, declarative_base
+import os
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/velyorix_license.db")
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class ActivationKey(Base):
+    __tablename__ = "activation_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code_hash = Column(String(128), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    bound_hwid = Column(String(256), nullable=True)
+    status = Column(String(32), nullable=False, default="active")  # active / disabled / expired
+    notes = Column(Text, nullable=True)
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(64), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(128), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+EOF
+
+    # 创建认证模块
+    cat > api/auth.py << 'EOF'
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+import os
+
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: str) -> Optional[str]:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+        return username
+    except JWTError:
+        return None
+EOF
+
+    # 创建许可证服务
+    cat > api/license_service.py << 'EOF'
+import datetime
+import secrets
+import hmac
+import hashlib
+from typing import Optional, Tuple
+from sqlalchemy.orm import Session
+from models import ActivationKey
+
+SERVER_SECRET = "velyorix-server-secret-2024"
+
+def make_code_hash(code: str) -> str:
+    digest = hmac.new(SERVER_SECRET.encode("utf-8"), code.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest
+
+def generate_activation_code() -> str:
+    return secrets.token_urlsafe(32)
+
+def create_activation_key(db: Session, valid_days: int = 365, notes: Optional[str] = None) -> Tuple[str, Optional[datetime.datetime]]:
+    code = generate_activation_code()
+    code_hash = make_code_hash(code)
+    now = datetime.datetime.utcnow()
+    expires_at = now + datetime.timedelta(days=valid_days) if valid_days and valid_days > 0 else None
+
+    db_key = ActivationKey(
+        code_hash=code_hash,
+        expires_at=expires_at,
+        notes=notes,
+        status="active"
+    )
+    db.add(db_key)
+    db.commit()
+    db.refresh(db_key)
+
+    return code, expires_at
+
+def activate_key(db: Session, code_hash: str, machine_code: str) -> Tuple[bool, str, Optional[datetime.datetime]]:
+    key = db.query(ActivationKey).filter(ActivationKey.code_hash == code_hash).first()
+    if not key:
+        return False, "invalid_code", None
+
+    if key.status != "active":
+        return False, "disabled", None
+
+    now = datetime.datetime.utcnow()
+    if key.expires_at and key.expires_at < now:
+        key.status = "expired"
+        db.commit()
+        return False, "expired", key.expires_at
+
+    bound_hwid = key.bound_hwid
+    if bound_hwid:
+        if bound_hwid != machine_code:
+            return False, "bound_to_other", key.expires_at
+        else:
+            return True, "already_bound_same", key.expires_at
+
+    key.bound_hwid = machine_code
+    db.commit()
+    return True, "bound_now", key.expires_at
+
+def verify_key(db: Session, code_hash: str, machine_code: str) -> Tuple[bool, str, Optional[datetime.datetime], Optional[str]]:
+    key = db.query(ActivationKey).filter(ActivationKey.code_hash == code_hash).first()
+    if not key:
+        return False, "invalid_code", None, None
+
+    if key.status != "active":
+        return False, "disabled", key.expires_at, key.bound_hwid
+
+    now = datetime.datetime.utcnow()
+    if key.expires_at and key.expires_at < now:
+        key.status = "expired"
+        db.commit()
+        return False, "expired", key.expires_at, key.bound_hwid
+
+    if key.bound_hwid and key.bound_hwid != machine_code:
+        return False, "bound_to_other", key.expires_at, key.bound_hwid
+
+    return True, "valid", key.expires_at, key.bound_hwid
+
+def disable_key(db: Session, key_id: int) -> bool:
+    key = db.query(ActivationKey).filter(ActivationKey.id == key_id).first()
+    if not key:
+        return False
+
+    key.status = "disabled"
+    db.commit()
+    return True
+
+def get_keys_list(db: Session, page: int = 1, per_page: int = 20) -> Tuple[list, int]:
+    from sqlalchemy import func as sql_func
+    total = db.query(sql_func.count(ActivationKey.id)).scalar()
+    keys = db.query(ActivationKey).order_by(ActivationKey.created_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+    return keys, total
+
+def get_key_stats(db: Session) -> dict:
+    from sqlalchemy import func as sql_func
+    total_keys = db.query(sql_func.count(ActivationKey.id)).scalar()
+    active_keys = db.query(sql_func.count(ActivationKey.id)).filter(ActivationKey.status == "active").scalar()
+    bound_keys = db.query(sql_func.count(ActivationKey.id)).filter(ActivationKey.bound_hwid.isnot(None)).scalar()
+    expired_keys = db.query(sql_func.count(ActivationKey.id)).filter(ActivationKey.status == "expired").scalar()
+    disabled_keys = db.query(sql_func.count(ActivationKey.id)).filter(ActivationKey.status == "disabled").scalar()
+
+    return {
+        "total_keys": total_keys,
+        "active_keys": active_keys,
+        "bound_keys": bound_keys,
+        "expired_keys": expired_keys,
+        "disabled_keys": disabled_keys
+    }
+EOF
+
+    # 创建主应用
+    cat > api/main.py << 'EOF'
+import os
+import datetime
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional, List
+import uvicorn
+
+from models import engine, get_db, Base, AdminUser
+from auth import verify_token, get_password_hash, verify_password, create_access_token
+from license_service import create_activation_key, activate_key, verify_key, disable_key, get_keys_list, get_key_stats, make_code_hash
+
+# 创建数据库表
+Base.metadata.create_all(bind=engine)
+
+# 创建默认管理员用户
+def create_default_admin():
+    from sqlalchemy.orm import sessionmaker
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = SessionLocal()
+    try:
+        admin = db.query(AdminUser).filter(AdminUser.username == "admin").first()
+        if not admin:
+            hashed_password = get_password_hash("admin123")
+            admin = AdminUser(
+                username="admin",
+                hashed_password=hashed_password,
+                is_active=True
+            )
+            db.add(admin)
+            db.commit()
+            print("Default admin user created: admin/admin123")
+    finally:
+        db.close()
+
+create_default_admin()
+
+# Rate limiting
+limiter = Limiter(key_func=get_remote_address)
+app = FastAPI(title="Velyorix License Server", version="1.0.0")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security
+security = HTTPBearer(auto_error=False)
+
+# Pydantic models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class CreateKeyRequest(BaseModel):
+    valid_days: Optional[int] = 365
+    notes: Optional[str] = None
+
+class CreateKeyResponse(BaseModel):
+    activation_code: str
+    expires_at: Optional[str]
+
+class ActivateRequest(BaseModel):
+    activation_code: str
+    machine_code: str
+
+class ActivateResponse(BaseModel):
+    allowed: bool
+    expires_at: Optional[str]
+    message: Optional[str]
+
+class VerifyRequest(BaseModel):
+    activation_code: str
+    machine_code: str
+
+class VerifyResponse(BaseModel):
+    valid: bool
+    expires_at: Optional[str]
+    bound_hwid: Optional[str]
+    message: Optional[str]
+
+class KeyInfo(BaseModel):
+    id: int
+    created_at: str
+    expires_at: Optional[str]
+    bound_hwid: Optional[str]
+    status: str
+    notes: Optional[str]
+
+class KeysListResponse(BaseModel):
+    keys: List[KeyInfo]
+    total: int
+    page: int
+    per_page: int
+
+class DisableKeyRequest(BaseModel):
+    key_id: int
+
+class StatsResponse(BaseModel):
+    total_keys: int
+    active_keys: int
+    bound_keys: int
+    expired_keys: int
+    disabled_keys: int
+
+# Dependency to get current admin user
+async def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Token required")
+
+    username = verify_token(credentials.credentials)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    admin = db.query(AdminUser).filter(AdminUser.username == username, AdminUser.is_active == True).first()
+    if not admin:
+        raise HTTPException(status_code=401, detail="Admin not found or inactive")
+
+    return admin
+
+# Admin routes
+@app.post("/api/admin/login", response_model=LoginResponse)
+@limiter.limit("5/minute")
+async def admin_login(request: Request, login_data: LoginRequest, db: Session = Depends(get_db)):
+    admin = db.query(AdminUser).filter(AdminUser.username == login_data.username).first()
+    if not admin or not verify_password(login_data.password, admin.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    access_token = create_access_token(data={"sub": admin.username})
+    return LoginResponse(access_token=access_token)
+
+@app.post("/api/admin/create_key", response_model=CreateKeyResponse)
+async def admin_create_key(req: CreateKeyRequest, admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    code, expires_at = create_activation_key(db=db, valid_days=req.valid_days, notes=req.notes)
+    return CreateKeyResponse(activation_code=code, expires_at=expires_at.isoformat() if expires_at else None)
+
+@app.get("/api/admin/keys", response_model=KeysListResponse)
+async def admin_get_keys(page: int = 1, per_page: int = 20, admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    keys, total = get_keys_list(db, page, per_page)
+    key_infos = []
+    for key in keys:
+        key_infos.append(KeyInfo(
+            id=key.id,
+            created_at=key.created_at.isoformat(),
+            expires_at=key.expires_at.isoformat() if key.expires_at else None,
+            bound_hwid=key.bound_hwid,
+            status=key.status,
+            notes=key.notes
+        ))
+
+    return KeysListResponse(keys=key_infos, total=total, page=page, per_page=per_page)
+
+@app.post("/api/admin/disable_key")
+async def admin_disable_key(req: DisableKeyRequest, admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    success = disable_key(db, req.key_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"message": "Key disabled successfully"}
+
+@app.get("/api/admin/stats", response_model=StatsResponse)
+async def admin_get_stats(admin = Depends(get_current_admin), db: Session = Depends(get_db)):
+    stats = get_key_stats(db)
+    return StatsResponse(**stats)
+
+# Public license API routes
+@app.post("/api/activate", response_model=ActivateResponse)
+@limiter.limit("10/minute")
+async def license_activate(req: ActivateRequest, db: Session = Depends(get_db)):
+    code_hash = make_code_hash(req.activation_code)
+    allowed, reason, expires_at = activate_key(db, code_hash, req.machine_code)
+    return ActivateResponse(allowed=allowed, expires_at=expires_at.isoformat() if expires_at else None, message=reason)
+
+@app.post("/api/verify", response_model=VerifyResponse)
+@limiter.limit("30/minute")
+async def license_verify(req: VerifyRequest, db: Session = Depends(get_db)):
+    code_hash = make_code_hash(req.activation_code)
+    valid, reason, expires_at, bound_hwid = verify_key(db, code_hash, req.machine_code)
+    return VerifyResponse(valid=valid, expires_at=expires_at.isoformat() if expires_at else None, bound_hwid=bound_hwid, message=reason)
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.datetime.utcnow().isoformat()}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+EOF
+
+    log_success "API服务创建完成"
+}
+
+# 创建Web管理界面
+create_web_interface() {
+    log_info "创建Web管理界面..."
+
+    cat > web/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velyorix License Server - 管理后台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .sidebar { min-height: 100vh; background: #343a40; }
+        .sidebar .nav-link { color: rgba(255,255,255,.75); padding: 0.75rem 1rem; }
+        .sidebar .nav-link:hover { color: #fff; background: rgba(255,255,255,.1); }
+        .sidebar .nav-link.active { color: #fff; background: #0d6efd; }
+        .main-content { padding: 20px; }
+        .stats-card { transition: transform 0.2s; }
+        .stats-card:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-3 col-lg-2 px-0 sidebar">
+                <div class="d-flex flex-column">
+                    <div class="p-3">
+                        <h5 class="text-white mb-4"><i class="fas fa-key"></i> Velyorix License</h5>
+                        <nav class="nav flex-column">
+                            <a class="nav-link active" href="#dashboard" onclick="showSection('dashboard')"><i class="fas fa-tachometer-alt"></i> 控制台</a>
+                            <a class="nav-link" href="#create-key" onclick="showSection('create-key')"><i class="fas fa-plus-circle"></i> 生成激活码</a>
+                            <a class="nav-link" href="#manage-keys" onclick="showSection('manage-keys')"><i class="fas fa-list"></i> 管理激活码</a>
+                        </nav>
+                    </div>
+                    <div class="mt-auto p-3">
+                        <button class="btn btn-outline-light btn-sm w-100" onclick="logout()"><i class="fas fa-sign-out-alt"></i> 退出登录</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-9 col-lg-10 px-0">
+                <div id="login-section" class="main-content">
+                    <div class="row justify-content-center">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header"><h4><i class="fas fa-lock"></i> 管理员登录</h4></div>
+                                <div class="card-body">
+                                    <form id="login-form">
+                                        <div class="mb-3">
+                                            <label class="form-label">用户名</label>
+                                            <input type="text" class="form-control" id="username" value="admin" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">密码</label>
+                                            <input type="password" class="form-control" id="password" value="admin123" required>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-sign-in-alt"></i> 登录</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dashboard-section" class="main-content" style="display: none;">
+                    <h2><i class="fas fa-tachometer-alt"></i> 控制台</h2>
+                    <div class="row" id="stats-cards"></div>
+                </div>
+
+                <div id="create-key-section" class="main-content" style="display: none;">
+                    <h2><i class="fas fa-plus-circle"></i> 生成激活码</h2>
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="card">
+                                <div class="card-body">
+                                    <form id="create-key-form">
+                                        <div class="mb-3">
+                                            <label class="form-label">有效期（天数）</label>
+                                            <select class="form-control" id="valid-days">
+                                                <option value="30">30天</option><option value="90">90天</option>
+                                                <option value="365" selected>1年</option><option value="730">2年</option>
+                                                <option value="0">永久</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">备注</label>
+                                            <textarea class="form-control" id="notes" rows="3"></textarea>
+                                        </div>
+                                        <button type="submit" class="btn btn-success"><i class="fas fa-plus"></i> 生成激活码</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card">
+                                <div class="card-body">
+                                    <div id="generated-code" class="alert alert-info" style="display: none;">
+                                        <strong>激活码：</strong><br><code id="activation-code" class="fs-6"></code><br><br>
+                                        <button class="btn btn-sm btn-outline-primary" onclick="copyToClipboard()"><i class="fas fa-copy"></i> 复制</button>
+                                    </div>
+                                    <div class="alert alert-warning"><strong>注意：</strong>激活码只会显示一次，请妥善保存！</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="manage-keys-section" class="main-content" style="display: none;">
+                    <h2><i class="fas fa-list"></i> 管理激活码</h2>
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped" id="keys-table">
+                                    <thead><tr>
+                                        <th>ID</th><th>创建时间</th><th>过期时间</th><th>绑定机器</th><th>状态</th><th>备注</th><th>操作</th>
+                                    </tr></thead>
+                                    <tbody id="keys-tbody"></tbody>
+                                </table>
+                            </div>
+                            <nav id="pagination"></nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentToken = localStorage.getItem('admin_token');
+        let currentPage = 1;
+
+        const API_BASE = window.location.origin;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            if (currentToken) {
+                showMainInterface();
+                loadDashboard();
+            } else {
+                showLogin();
+            }
+
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
+            document.getElementById('create-key-form').addEventListener('submit', handleCreateKey);
+        });
+
+        function showLogin() {
+            document.getElementById('login-section').style.display = 'block';
+            document.getElementById('dashboard-section').style.display = 'none';
+            document.getElementById('create-key-section').style.display = 'none';
+            document.getElementById('manage-keys-section').style.display = 'none';
+        }
+
+        function showMainInterface() {
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('dashboard-section').style.display = 'block';
+        }
+
+        function showSection(section) {
+            if (!currentToken) { showLogin(); return; }
+            document.querySelectorAll('.main-content').forEach(el => el.style.display = 'none');
+            document.getElementById(section + '-section').style.display = 'block';
+            document.querySelectorAll('.sidebar .nav-link').forEach(el => el.classList.remove('active'));
+            document.querySelector(`[href="#${section}"]`).classList.add('active');
+
+            if (section === 'dashboard') loadDashboard();
+            if (section === 'manage-keys') loadKeys();
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentToken = data.access_token;
+                    localStorage.setItem('admin_token', currentToken);
+                    showMainInterface();
+                    loadDashboard();
+                } else {
+                    alert('登录失败');
+                }
+            } catch (error) {
+                alert('网络错误');
+            }
+        }
+
+        function logout() {
+            currentToken = null;
+            localStorage.removeItem('admin_token');
+            showLogin();
+        }
+
+        async function loadDashboard() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/stats`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+
+                if (response.ok) {
+                    const stats = await response.json();
+                    displayStats(stats);
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+            }
+        }
+
+        function displayStats(stats) {
+            const html = `
+                <div class="col-md-3 mb-4">
+                    <div class="card stats-card bg-primary text-white">
+                        <div class="card-body">
+                            <h6>总激活码</h6><h2>${stats.total_keys}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-4">
+                    <div class="card stats-card bg-success text-white">
+                        <div class="card-body">
+                            <h6>活跃激活码</h6><h2>${stats.active_keys}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-4">
+                    <div class="card stats-card bg-info text-white">
+                        <div class="card-body">
+                            <h6>已绑定</h6><h2>${stats.bound_keys}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-4">
+                    <div class="card stats-card bg-danger text-white">
+                        <div class="card-body">
+                            <h6>禁用/过期</h6><h2>${stats.disabled_keys + stats.expired_keys}</h2>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('stats-cards').innerHTML = html;
+        }
+
+        async function handleCreateKey(e) {
+            e.preventDefault();
+            const validDays = parseInt(document.getElementById('valid-days').value);
+            const notes = document.getElementById('notes').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/create_key`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: JSON.stringify({ valid_days: validDays, notes })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('activation-code').textContent = data.activation_code;
+                    document.getElementById('generated-code').style.display = 'block';
+                    document.getElementById('create-key-form').reset();
+                    loadDashboard();
+                } else if (response.status === 401) {
+                    logout();
+                } else {
+                    alert('生成失败');
+                }
+            } catch (error) {
+                alert('网络错误');
+            }
+        }
+
+        function copyToClipboard() {
+            const code = document.getElementById('activation-code').textContent;
+            navigator.clipboard.writeText(code).then(() => alert('已复制'));
+        }
+
+        async function loadKeys(page = 1) {
+            currentPage = page;
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/keys?page=${page}`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    displayKeys(data);
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Error loading keys:', error);
+            }
+        }
+
+        function displayKeys(data) {
+            const tbody = document.getElementById('keys-tbody');
+            tbody.innerHTML = '';
+
+            data.keys.forEach(key => {
+                const statusBadge = getStatusBadge(key.status);
+                const expiresAt = key.expires_at ? new Date(key.expires_at).toLocaleString() : '永久';
+                const createdAt = new Date(key.created_at).toLocaleString();
+
+                const row = `
+                    <tr>
+                        <td>${key.id}</td>
+                        <td>${createdAt}</td>
+                        <td>${expiresAt}</td>
+                        <td><code>${key.bound_hwid || '-'}</code></td>
+                        <td>${statusBadge}</td>
+                        <td>${key.notes || '-'}</td>
+                        <td>
+                            ${key.status === 'active' ? `<button class="btn btn-sm btn-outline-danger" onclick="disableKey(${key.id})">禁用</button>` : '-'}
+                        </td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+
+            if (data.total > data.per_page) {
+                const totalPages = Math.ceil(data.total / data.per_page);
+                let pagination = '<ul class="pagination">';
+                for (let i = 1; i <= totalPages; i++) {
+                    pagination += `<li class="page-item ${i === data.page ? 'active' : ''}"><a class="page-link" href="#" onclick="loadKeys(${i})">${i}</a></li>`;
+                }
+                pagination += '</ul>';
+                document.getElementById('pagination').innerHTML = pagination;
+            }
+        }
+
+        function getStatusBadge(status) {
+            const badges = {
+                'active': '<span class="badge bg-success">活跃</span>',
+                'disabled': '<span class="badge bg-danger">禁用</span>',
+                'expired': '<span class="badge bg-warning">过期</span>'
+            };
+            return badges[status] || `<span class="badge bg-secondary">${status}</span>`;
+        }
+
+        async function disableKey(keyId) {
+            if (!confirm('确定禁用这个激活码吗？')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/disable_key`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    },
+                    body: JSON.stringify({ key_id: keyId })
+                });
+
+                if (response.ok) {
+                    loadKeys(currentPage);
+                    loadDashboard();
+                    alert('已禁用');
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                alert('网络错误');
+            }
+        }
+    </script>
+</body>
+</html>
+EOF
+
+    log_success "Web管理界面创建完成"
+}
+
+# 创建Docker配置
+create_docker_config() {
+    log_info "创建Docker配置..."
+
+    # 创建Dockerfile
+    cat > Dockerfile << 'EOF'
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY api/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY api/ .
+
+EXPOSE 8000
+
+CMD ["python", "main.py"]
+EOF
+
+    # 创建docker-compose.yml
+    cat > docker-compose.yml << 'EOF'
+version: '3.8'
+
+services:
+  velyorix-license-server:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=velyorix-secret-key-2024-production-ready
+      - DATABASE_URL=sqlite:///./data/velyorix_license.db
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./web:/usr/share/nginx/html
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - velyorix-license-server
+    restart: unless-stopped
+EOF
+
+    # 创建Nginx配置
+    cat > nginx.conf << 'EOF'
+events {
+    worker_connections 1024;
+}
+
+http {
+    server {
+        listen 80;
+        server_name localhost;
+
+        location /api {
+            proxy_pass http://velyorix-license-server:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location / {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}
+EOF
+
+    log_success "Docker配置创建完成"
+}
+
+# 启动服务
+start_services() {
+    log_info "启动Velyorix License Server..."
+
+    # 启动服务
+    docker-compose up -d --build
+
+    # 等待服务启动
+    log_info "等待服务启动..."
+    sleep 10
+
+    # 检查服务状态
+    if curl -f http://localhost/api/health >/dev/null 2>&1; then
+        log_success "服务启动成功！"
+    else
+        log_error "服务启动失败，请检查日志：docker-compose logs"
+        exit 1
+    fi
+}
+
+# 显示安装结果
+show_installation_info() {
+    log_success "🎉 Velyorix License Server 安装完成！"
+    echo ""
+    echo "📊 访问信息："
+    echo "   管理后台: http://$(hostname -I | awk '{print $1}')"
+    echo "   API地址: http://$(hostname -I | awk '{print $1}')/api"
+    echo ""
+    echo "👤 默认管理员账号："
+    echo "   用户名: admin"
+    echo "   密码: admin123"
+    echo ""
+    echo "🔧 管理命令："
+    echo "   查看日志: docker-compose logs -f"
+    echo "   重启服务: docker-compose restart"
+    echo "   停止服务: docker-compose down"
+    echo ""
+    echo "⚠️  重要提醒："
+    echo "   1. 请立即修改默认管理员密码"
+    echo "   2. 在生产环境中配置防火墙和HTTPS"
+    echo "   3. 定期备份 data/ 目录中的数据库文件"
+    echo ""
+}
+
+# 主函数
+main() {
+    echo "🚀 Velyorix License Server 一键安装脚本"
+    echo "========================================"
+
+    check_os
+    install_docker
+    install_docker_compose
+    create_project
+    create_api_service
+    create_web_interface
+    create_docker_config
+    start_services
+    show_installation_info
+}
+
+# 主函数
+main() {
+    echo "🚀 Velyorix License Server 一键安装脚本"
+    echo "========================================"
+
+    # 检查是否为root用户
+    if [[ $EUID -ne 0 ]]; then
+        log_error "请使用 root 用户运行此脚本：sudo $0"
+        exit 1
+    fi
+
+    check_os
+    install_docker
+    install_docker_compose
+    create_project
+    create_api_service
+    create_web_interface
+    create_docker_config
+    start_services
+    show_installation_info
+}
+
+# 如果脚本被直接执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
